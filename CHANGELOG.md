@@ -5,6 +5,30 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.4.4] - 2026-10-10
+
+### 修复
+
+- mac 游戏包导入超时：发行包顶层是 `.app`，真工程根在
+  `Contents/Resources/autorun`（game/ 与 renpy/ 同级），此前管线误把
+  `.app` 根当工程根，rpa 解包/反编译/官中检测全落空、SDK 以错误目录
+  translate 倒出海量 duplicate label 输出；新增 `resolve_game_root()`
+  在建项/更新入口定位真根（顶层单一目录逐层下探兼容 zip 包装层，
+  未知布局原样返回不静默改道），SDK stdout 改落临时文件——原「先等
+  子进程退出、退出后才读」在输出超过管道缓冲（Windows 匿名管道 4KB）
+  时互锁，直到 3600s deadline 才报执行超时。实测 `.app` 根导入
+  12.2s 成功 4092 条对话（修复前同路径卡死 25 分钟+），PC 包回归
+  22.2s 同样 4092 条无变化（9a677f7）
+- mac SDK 生成失败（返回码 126）：官方 dmg（7.4.11/8.5.3 实测）卷根
+  是同名文件夹、.app 在其内一层，旧 `_extract_dmg` 只认卷根 `*.app`
+  → 自动下载必报「dmg 中未找到 .app」；且 dmg 为规避 macOS 公证把
+  `lib/**` 平台二进制改名 `*.macho` + 5 字节 RENPY 头（distribute.rpy），
+  官方靠 renpy.app 启动时 launcher（mac.rpy）剥头还原，headless 直接
+  跑 renpy.sh 即 `lib/<平台>/renpy` ENOENT。新增 `find_dmg_sdk_root()`
+  兼容三种卷布局并复制 SDK 根内容，`unmangle_mac_binaries()` 幂等还原
+  （装后即还原 + generate 入口自愈，存量手动安装副本下次生成自动
+  修好）（9a677f7）
+
 ## [v0.4.3] - 2026-10-07
 
 ### 新增
