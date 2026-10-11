@@ -3,6 +3,25 @@ import shutil
 from pathlib import Path
 
 
+def find_dmg_sdk_root(mount: Path) -> Path | None:
+    """定位 dmg 卷内的 SDK 根（含 renpy.sh/renpy.app 的目录）。
+
+    官方 dmg（7.4.11 / 8.5.3 实测）卷根是同名**文件夹**
+    （renpy-X.Y.Z-sdk/，.app 在其内一层），并非卷根直接一个 .app；
+    也兼容「卷根即 SDK」与「卷根直接是 .app」布局。找不到返回 None，
+    由调用方给出明确报错。
+    """
+    if (mount / 'renpy.sh').exists() or (mount / 'renpy.app').exists():
+        return mount
+    for child in sorted(mount.iterdir()):
+        if child.name.startswith(('.', '[')):  # 跳过 .HFS+ / [HFS+] 卷级隐藏项
+            continue
+        if child.is_dir() and ((child / 'renpy.sh').exists()
+                               or (child / 'renpy.app').exists()):
+            return child
+    return None
+
+
 def sdk_package(version: str) -> tuple:
     """按平台/架构选择 SDK 包与解压方式（官网 dl 目录格式）"""
     import platform
@@ -110,13 +129,24 @@ def make_download_body(state, version: str):
                 ['hdiutil', 'attach', '-nobrowse', '-mountpoint', str(mp),
                  str(tmp_pkg)], check=True, capture_output=True)
             try:
-                apps = list(mp.glob('*.app'))
-                if not apps:
-                    raise RuntimeError('dmg 中未找到 .app')
-                job.emit_progress(0.8, f'正在拷贝 {apps[0].name}...')
+                from sdk_manager import unmangle_mac_binaries
+                sdk_root = find_dmg_sdk_root(mp)
+                if sdk_root is None:
+                    raise RuntimeError(
+                        "dmg 中未找到 Ren'Py SDK（缺 renpy.sh/renpy.app）")
+                job.emit_progress(0.8, f'正在拷贝 {sdk_root.name}...')
                 staged_sdk.mkdir(parents=True, exist_ok=True)
-                subprocess.run(['cp', '-a', str(apps[0]), str(staged_sdk) + '/'],
-                               check=True)
+                # 复制 SDK 根的**内容**而非目录本身：staged_sdk 自身必须
+                # 是工程根（renpy.sh/lib 顶层），get_renpy_exe 才能命中；
+                # 跳过卷级隐藏项（.HFS+ 私有数据、[HFS+]）
+                for item in sdk_root.iterdir():
+                    if item.name.startswith(('.', '[')):
+                        continue
+                    subprocess.run(['cp', '-a', str(item),
+                                    str(staged_sdk) + '/'], check=True)
+                # dmg 为规避公证把平台二进制改名 *.macho +RENPY 头，
+                # 不还原则 renpy.sh exec 缺文件（返回码 126）
+                unmangle_mac_binaries(staged_sdk)
                 # 去掉下载隔离属性，避免 Gatekeeper 拦截
                 subprocess.run(['xattr', '-dr', 'com.apple.quarantine',
                                 str(staged_sdk)], capture_output=True)

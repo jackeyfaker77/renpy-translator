@@ -28,8 +28,8 @@ from logger import TranslationLogger
 from project_manager import ProjectManager
 from services.game_pipeline import (  # noqa: F401（_unrpyc_python_exe/copy_game_files 为兼容旧导入再导出）
     _unrpyc_python_exe, copy_game_files, copy_with_progress,
-    locate_ui_hints, refresh_characters, resolve_sdk_or_raise,
-    unpack_and_decompile,
+    locate_ui_hints, refresh_characters, resolve_game_root,
+    resolve_sdk_or_raise, unpack_and_decompile,
 )
 
 # 中文相关语言目录名（小写匹配）
@@ -280,6 +280,9 @@ class ProjectCreator:
         loop = asyncio.get_event_loop()
         _rie = partial(loop.run_in_executor, None)
         db = None
+        # macOS .app 发行包顶层不是工程根（game/ 在 Contents/Resources/
+        # autorun 下），先定位真根再建库/复制——否则下游全程找不到 game/
+        game_dir = str(resolve_game_root(game_dir))
         try:
             # 步骤1: 创建项目数据库
             progress(0.05, '正在初始化项目...')

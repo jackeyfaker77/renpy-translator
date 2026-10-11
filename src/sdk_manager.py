@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -41,6 +42,38 @@ def detect_engine_version(base) -> tuple | None:
 # （Ren'Py 7 已停更，读 7.x 游戏的 .rpyc 必须用它）
 DEFAULT_SDK_8 = '8.5.3'
 DEFAULT_SDK_7 = '7.4.11'
+
+
+def unmangle_mac_binaries(sdk_path) -> int:
+    """还原 dmg 分发的 .macho 平台二进制，返回还原个数（幂等）。
+
+    Ren'Py 打 macOS dmg 时为规避公证，把未签名二进制改名为 *.macho
+    并加 5 字节 "RENPY" 头（见 launcher/game/distribute.rpy）；官方靠
+    renpy.app 启动时 launcher（mac.rpy）剥头改回。我们 headless 直接
+    跑 renpy.sh，不经 GUI——不还原则 `lib/<平台>/renpy` 缺失，
+    renpy.sh line61 exec 直接 ENOENT（用户报错：生成失败 返回码 126）。
+
+    找不到 *.macho（zip/Windows 布局）时零副作用；无 RENPY 头的
+    .macho 只改名不剥数据（避免误伤）。
+    """
+    sdk_path = Path(sdk_path)
+    count = 0
+    for macho in sdk_path.rglob('*.macho'):
+        try:
+            data = macho.read_bytes()
+        except OSError:
+            continue
+        # mac.rpy 无条件跳过 5 字节；此处仅在头存在时剥，更稳
+        body = data[5:] if data.startswith(b'RENPY') else data
+        target = macho.with_suffix('')  # renpy.macho → renpy
+        try:
+            target.write_bytes(body)
+            target.chmod(0o755)
+            macho.unlink()
+            count += 1
+        except OSError:
+            continue
+    return count
 
 
 def find_installed_sdks() -> list:
@@ -125,6 +158,10 @@ class SDKManager:
         if not self.sdk_path:
             return {'success': False, 'message': '未配置 Ren\'Py SDK 路径', 'output': ''}
 
+        # 自愈：dmg 副本（含用户手动放入的存量安装）里 *.macho 未还原
+        # 会让 renpy.sh exec 缺文件（返回码 126）——幂等，正常 SDK 零开销
+        unmangle_mac_binaries(self.sdk_path)
+
         renpy_exe = self.get_renpy_exe()
         if not renpy_exe.exists():
             return {'success': False, 'message': f'找不到 {renpy_exe}', 'output': ''}
@@ -164,44 +201,51 @@ class SDKManager:
             # 'get_renders'）。cwd 在 SDK 目录时两处都来自同一 SDK，自洽。
             #
             # Popen + 轮询而非 subprocess.run(timeout=...)：run 阻塞期间
-            # 任务无法取消（最长 1 小时），轮询让 cancel_event 能及时生效
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                # Ren'Py 的 stdout 固定输出 UTF-8（会回显脚本内容/报错，
-                # 日文游戏的文本对 GBK 是非法序列）。不指定 encoding 时
-                # text=True 用系统区域编码，中文 Windows 上是 cp936，
-                # read() 直接 UnicodeDecodeError，且真实 SDK 输出丢失、
-                # 翻译实际成功也会被误报成失败。
-                encoding='utf-8', errors='replace',
-                cwd=str(self.sdk_path)
-            )
-            # 注册到全局表：服务关停时兜底杀树（取消/超时路径之外，
-            # os._exit 抢在轮询循环响应前执行的话进程会变孤儿）
-            track(proc)
+            # 任务无法取消（最长 1 小时），轮询让 cancel_event 能及时生效。
+            #
+            # stdout 落临时文件而非 PIPE：管道 +「先等退出、退出后才读」
+            # 在子进程输出超过管道缓冲（Windows 匿名管道默认 4KB）时互锁
+            # ——子进程阻塞在写、父进程阻塞在等退出，直到 deadline 才报
+            # 「执行超时」。工程根错误时 renpy 会倒出海量 duplicate label
+            # 错误（实测 10KB+），必踩；临时文件无缓冲上限，取消/超时
+            # 路径也不需要和读线程抢关闭时序。输出按 Ren'Py 实际编码
+            # UTF-8 读（会回显脚本内容/报错，日文游戏的文本对 GBK 是
+            # 非法序列——用系统区域编码读会 UnicodeDecodeError，真实
+            # SDK 输出丢失、翻译实际成功也会被误报成失败）。
+            with tempfile.TemporaryFile(
+                    mode='w+', encoding='utf-8', errors='replace') as out_f:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=out_f,
+                    stderr=subprocess.STDOUT,
+                    cwd=str(self.sdk_path)
+                )
+                # 注册到全局表：服务关停时兜底杀树（取消/超时路径之外，
+                # os._exit 抢在轮询循环响应前执行的话进程会变孤儿）
+                track(proc)
 
-            deadline = time.monotonic() + 3600
-            while proc.poll() is None:
-                if cancel_event is not None and cancel_event.is_set():
-                    # 取消：先 terminate 给子进程退出机会，不行再强杀
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
+                deadline = time.monotonic() + 3600
+                while proc.poll() is None:
+                    if cancel_event is not None and cancel_event.is_set():
+                        # 取消：先 terminate 给子进程退出机会，不行再强杀
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait()
+                        return {'success': False, 'cancelled': True,
+                                'message': '已取消', 'output': '',
+                                'returncode': -1}
+                    if time.monotonic() > deadline:
                         proc.kill()
                         proc.wait()
-                    return {'success': False, 'cancelled': True,
-                            'message': '已取消', 'output': '', 'returncode': -1}
-                if time.monotonic() > deadline:
-                    proc.kill()
-                    proc.wait()
-                    return {'success': False, 'message': '执行超时',
-                            'output': '', 'returncode': -1}
-                time.sleep(0.5)
+                        return {'success': False, 'message': '执行超时',
+                                'output': '', 'returncode': -1}
+                    time.sleep(0.5)
 
-            output = proc.stdout.read() if proc.stdout else ''
+                out_f.seek(0)
+                output = out_f.read()
             print(f'[SDK] 输出:\n{output}')
 
             if proc.returncode == 0:

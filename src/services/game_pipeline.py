@@ -16,6 +16,32 @@ import sys
 from pathlib import Path
 
 
+def resolve_game_root(game_dir) -> Path:
+    """定位真正的 Ren'Py 工程根（含 game/ 子目录的目录）。
+
+    macOS 发行包顶层是 .app（或其父目录），工程根在
+    .app/Contents/Resources/autorun 下（game/ 与 renpy/ 同级）；
+    PC 发行包顶层即工程根。顶层仅为单一目录时逐层下探（zip 解压出的
+    外层包装）。未知布局原样返回——让后续步骤按原逻辑报错，不静默改道。
+    """
+    origin = Path(game_dir)
+    root = origin
+    for _ in range(4):  # 下探深度上限：防异常布局/symlink 环绕死循环
+        if (root / 'game').is_dir():
+            return root
+        autorun = root / 'Contents' / 'Resources' / 'autorun'
+        if (autorun / 'game').is_dir():
+            return autorun
+        if not root.is_dir():
+            break
+        children = [p for p in root.iterdir()
+                    if p.is_dir() and not p.name.startswith(('.', '['))]
+        if len(children) != 1:
+            break
+        root = children[0]
+    return origin
+
+
 # tl 模板注释行里的引号说话人：# "Ricardo" "..."（旁白注释只有一个
 # 字符串，要求两个串才不误吞）
 _TL_QUOTED_SPEAKER_RE = re.compile(

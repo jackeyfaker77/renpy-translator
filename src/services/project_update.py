@@ -42,7 +42,7 @@ from logger import TranslationLogger
 from project_manager import ProjectManager
 from services.game_pipeline import (
     copy_with_progress, locate_ui_hints, refresh_characters,
-    resolve_sdk_or_raise, unpack_and_decompile,
+    resolve_game_root, resolve_sdk_or_raise, unpack_and_decompile,
 )
 from services.project_creation import (
     cleanup_conflicts, detect_official_chinese, generate_tl_templates,
@@ -273,6 +273,8 @@ class ProjectUpdater:
         """
         loop = asyncio.get_event_loop()
         _rie = partial(loop.run_in_executor, None)
+        # 与建项一致：mac .app 发行包先定位到含 game/ 的工程根再复制
+        new_game_dir = str(resolve_game_root(new_game_dir))
 
         project_dir = self.project_manager.project_dir(name)
         game_work_dir = project_dir / 'game'
