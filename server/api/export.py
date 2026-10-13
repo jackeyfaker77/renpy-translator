@@ -20,6 +20,7 @@ async def export_info(state: AppState = Depends(require_project)):
     translated = d['translated'] + u['translated'] + n['translated']
     # 标记校验前置：这些译文导出时会被闸门拦截保留英文，提前列出让用户修订
     markup_issues = await state.db_call(scan_markup_issues, state.db)
+    project_dir = state.project_manager.project_dir(state.current_project)
     return {
         'dialogue': d, 'ui': u, 'names': n,
         'total': total, 'translated': translated,
@@ -27,6 +28,8 @@ async def export_info(state: AppState = Depends(require_project)):
         'markup_issues': markup_issues,
         # 导出产物只有 exports/{项目名}/{项目名}-translated.zip
         'exports_dir': str(_exports_dir(state, state.current_project)),
+        # macOS 来源项目建项时快照了 .app 壳：导出可选套壳产出可双击 .app
+        'has_shell': (project_dir / 'app-shell').exists(),
     }
 
 
@@ -63,8 +66,14 @@ async def markup_check_one(req: MarkupCheckIn,
             'translated_text': row.get('translated_text') or ''}
 
 
+class ExportGameReq(BaseModel):
+    shell: bool = True   # macOS 项目导出套 .app 壳（无壳项目忽略）
+
+
 @router.post('/game')
-async def export_game(state: AppState = Depends(require_project)):
+async def export_game(req: ExportGameReq | None = None,
+                      state: AppState = Depends(require_project)):
+    include_shell = True if req is None else req.shell
     # 未翻译/翻译不完全也允许导出（未译条目保持原文），由任务日志与前端提醒
     counts = {
         'dialogue': await state.db_call(state.db.get_dialogue_count),
@@ -149,13 +158,28 @@ async def export_game(state: AppState = Depends(require_project)):
                         '导出后编译校验未通过，自动修复未能解决（详见日志）')
 
                 # 打包为 {项目名}-translated.zip（exports/{项目名}/ 下，与项目包同目录）
+                # 带壳导出：工程落进 .app 壳的 Contents/Resources/autorun，
+                # zip 根即 Xxx.app（解压可双击）；无壳/不带壳则直接打包工程
+                pack_root = work_dir
+                shell_src = project_dir / 'app-shell'
+                if include_shell and shell_src.exists():
+                    from services.game_export import assemble_app_shell
+
+                    def _assemble():
+                        return assemble_app_shell(
+                            work_dir, shell_src,
+                            f'{state.current_project}.app')
+
+                    pack_root = await state.run_sync(_assemble)
+                    job.emit_log('已组装 macOS 应用壳（解压后可双击运行）')
+
                 exports_dir = _exports_dir(state, state.current_project)
                 zip_path = exports_dir / f'{state.current_project}-translated.zip'
                 job.emit_log(f'打包导出结果: {zip_path.name}')
 
                 def _zip():
                     zip_directory(
-                        work_dir, zip_path,
+                        pack_root, zip_path,
                         progress=lambda v, t: job.emit_progress(
                             0.95 + v * 0.05, t),
                         cancel_event=job.cancel_event)

@@ -11,6 +11,7 @@ import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
 import ImportTextsDialog from '../components/ImportTextsDialog.vue'
+import PageHelp from '../components/PageHelp.vue'
 import { useInlineEdit } from '../composables/useInlineEdit'
 
 const message = useMessage()
@@ -207,8 +208,9 @@ watch(() => query.source, () => { query.page = 0; load() })
 
 <template>
   <div>
-    <n-space align="center" style="margin-bottom: 12px" wrap>
+    <n-space align="center" style="width: 100%; margin-bottom: 12px" wrap>
       <h2 style="margin: 0">术语表</h2>
+      <page-help style="margin-left: auto" :section="'6,7'" />
       <n-button size="small" type="primary" :render-icon="renderIcon(AddOutline)" @click="openCreate">新增术语</n-button>
       <n-button size="small" :render-icon="renderIcon(ShareOutline)" @click="exportVisible = true">导出</n-button>
       <n-button size="small" :render-icon="renderIcon(DownloadOutline)" @click="importVisible = true">导入</n-button>

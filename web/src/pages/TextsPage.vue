@@ -12,6 +12,7 @@ import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
 import FailedBatchesDialog from '../components/FailedBatchesDialog.vue'
 import ImportTextsDialog from '../components/ImportTextsDialog.vue'
+import PageHelp from '../components/PageHelp.vue'
 import { useJobTask } from '../composables/useJobTask'
 import { useSessionStore } from '../stores/session'
 
@@ -369,8 +370,9 @@ watch(() => [query.filter_mode, query.character], () => { query.page = 0; load()
 
 <template>
   <div>
-    <n-space align="center" style="margin-bottom: 12px" wrap>
+    <n-space align="center" style="width: 100%; margin-bottom: 12px" wrap>
       <h2 style="margin: 0">{{ title }}</h2>
+      <page-help style="margin-left: auto" :section="isDialogue ? '5,7' : '4,7'" />
       <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)" @click="translateAll">全部翻译</n-button>
       <n-button size="small" @click="translatePage">翻译本页</n-button>
       <n-button size="small" @click="replacePreview = null; replaceVisible = true">查找并替换译文</n-button>

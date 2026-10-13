@@ -7,6 +7,7 @@ import {
 import { AddOutline, CloudDownloadOutline, FolderOpenOutline } from '@vicons/ionicons5'
 import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
+import PageHelp from '../components/PageHelp.vue'
 import { nativeReady, pickDirectory } from '../api/native'
 import { useJobTask } from '../composables/useJobTask'
 import { useSessionStore } from '../stores/session'
@@ -184,7 +185,10 @@ onMounted(async () => {
 
 <template>
   <div style="max-width: 860px">
-    <h2 style="margin-top: 0">模型配置</h2>
+    <n-space align="center" style="width: 100%; margin-top: 0">
+      <h2 style="margin: 0">模型配置</h2>
+      <page-help style="margin-left: auto" :section="'1'" />
+    </n-space>
 
     <n-card size="small" title="Ren'Py SDK" style="margin-bottom: 16px">
       <n-space vertical>

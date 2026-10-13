@@ -259,3 +259,78 @@ def test_mode_name_skips_nameless_character(tmp_path):
     svc = _service(db)
     _run(svc.translate_and_analyze('the_person', variable='r', mode='name'))
     assert db.cn_saved == []
+
+
+# ---- translate_all('both') 混合状态补齐 ----
+
+class _MultiStubDB(_NameStubDB):
+    """多角色批量桩：get_characters 返回全部角色"""
+
+    def __init__(self, chars, lines=('hi',)):
+        self.chars = [dict(c) for c in chars]
+        self._lines = list(lines)
+        self.cn_saved = []
+        self.profiles_saved = []
+
+    def get_characters(self):
+        return [dict(c) for c in self.chars]
+
+    def get_untranslated_characters(self):
+        return [dict(c) for c in self.chars
+                if not c.get('cn_name') and not c.get('is_placeholder')
+                and c.get('display_name')]
+
+    def get_variable_map(self):
+        return {c['variable']: c['display_name']
+                for c in self.chars if c.get('display_name')}
+
+    def get_dialogues_by_character(self, var):
+        return [{'original_text': t} for t in self._lines]
+
+    def update_character_cn_name(self, display_name, cn_name, variable=None):
+        self.cn_saved.append((display_name, cn_name, variable))
+        for c in self.chars:
+            if variable and c['variable'] == variable:
+                c['cn_name'] = cn_name
+
+    def save_profile(self, display_name, profile, variable=None):
+        self.profiles_saved.append((display_name, variable))
+        for c in self.chars:
+            if variable and c['variable'] == variable:
+                c['profile_json'] = '{}'
+
+
+def _char_row(variable, display_name, cn_name='', profile_json=''):
+    return {'variable': variable, 'display_name': display_name,
+            'cn_name': cn_name, 'profile_json': profile_json,
+            'is_placeholder': False}
+
+
+def test_translate_all_both_fills_gaps_only(tmp_path):
+    """混合状态：未译名走翻译+分析，已译名未分析只补分析（不覆盖人工译名）"""
+    db = _MultiStubDB([
+        _char_row('a', 'Alice'),                                   # 全缺
+        _char_row('b', 'Bella', cn_name='贝拉'),                    # 已译名未分析
+    ])
+    svc = _service(db)
+    result = _run(svc.translate_all(mode='both'))
+
+    assert result['completed'] == 2
+    # Alice 走 both：译名入库
+    assert ('Alice', '里卡多', 'a') in db.cn_saved
+    # Bella 只补画像，人工译名不被覆盖
+    assert not any(s[2] == 'b' for s in db.cn_saved)
+    assert {s[1] for s in db.profiles_saved} == {'a', 'b'}
+
+
+def test_translate_all_both_skips_done(tmp_path):
+    """已有人名且已分析的角色不重复处理"""
+    db = _MultiStubDB([
+        _char_row('a', 'Alice', cn_name='爱丽丝', profile_json='{}'),
+    ])
+    svc = _service(db)
+    result = _run(svc.translate_all(mode='both'))
+
+    assert result['nothing'] is True
+    assert db.cn_saved == []
+    assert db.profiles_saved == []

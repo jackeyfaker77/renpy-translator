@@ -31,6 +31,7 @@ const menuOptions: MenuOption[] = [
   { label: '剧情分支图·实验', key: '/story-graph' },
   { label: '人物关系图谱·实验', key: '/relations' },
   { label: '导出游戏', key: '/export' },
+  { label: '提示词设置', key: '/prompts' },
   { label: '模型配置', key: '/settings' },
 ]
 
@@ -77,12 +78,13 @@ function onMenu(key: string) {
   router.push(key)
 }
 
-/** 通用 confirm 问题回答 */
-async function answerConfirm(job: JobView, ok: boolean) {
+/** 通用 confirm 问题回答：action 如 'delete'/'keep'/'cancel'（也兼容布尔） */
+async function answerConfirm(job: JobView, action: string | boolean) {
   const q = job.question
   if (!q) return
   try {
-    await jobsStore.answer(job.id, q.question_id, { ok })
+    await jobsStore.answer(job.id, q.question_id,
+      typeof action === 'boolean' ? { ok: action } : { action })
   } catch (e) {
     toastError(message, e)
   }
@@ -339,8 +341,18 @@ onUnmounted(() => {
         <div style="font-weight: 600; margin-bottom: 6px">{{ question.payload.title }}</div>
         <div style="font-size: 13px; color: #ccc; white-space: pre-line">{{ question.payload.body }}</div>
         <n-space justify="end" style="margin-top: 10px">
-          <n-button size="small" @click="answerConfirm(j, false)">取消</n-button>
-          <n-button size="small" type="error" @click="answerConfirm(j, true)">确认</n-button>
+          <!-- 官中三动作：keep_label 存在时展示 取消/保留/删除 -->
+          <template v-if="question.payload.keep_label">
+            <n-button size="small" @click="answerConfirm(j, 'cancel')">取消</n-button>
+            <n-button size="small" type="primary" @click="answerConfirm(j, 'keep')">
+              {{ question.payload.keep_label }}
+            </n-button>
+            <n-button size="small" type="error" @click="answerConfirm(j, 'delete')">删除官中</n-button>
+          </template>
+          <template v-else>
+            <n-button size="small" @click="answerConfirm(j, false)">取消</n-button>
+            <n-button size="small" type="error" @click="answerConfirm(j, true)">确认</n-button>
+          </template>
         </n-space>
       </div>
       <embedded-review-dialog

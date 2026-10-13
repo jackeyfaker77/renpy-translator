@@ -238,9 +238,34 @@ class ExportCancelled(Exception):
     """导出被取消（协作式：循环内检查 cancel_event 触发）"""
 
 
+def assemble_app_shell(work_dir: Path, shell_dir: Path, app_name: str) -> Path:
+    """导出收尾：把工程整体落进 macOS 应用壳的 Contents/Resources/autorun。
+
+    shell_dir 是建项/更新时 sync_app_shell 快照的 app-shell/
+    （Info.plist、MacOS 启动器、Resources/lib 运行时等骨架，不含工程根）。
+    产出 work_dir.parent/<app_name>，zip 根即 Xxx.app——解压可双击运行。
+    work_dir 被整体移动进壳（原地消失），返回 .app 路径。
+    """
+    work_dir = Path(work_dir)
+    shell_dir = Path(shell_dir)
+    app_out = work_dir.parent / app_name
+    if app_out.exists():
+        shutil.rmtree(app_out)
+    shutil.copytree(shell_dir, app_out)
+    autorun = app_out / 'Contents' / 'Resources' / 'autorun'
+    autorun.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(work_dir), str(autorun))
+    return app_out
+
+
 def zip_directory(src_dir: Path, zip_path: Path, progress=None,
                   cancel_event=None):
-    """把目录打成 zip（内容含目录结构），progress(0~1, 文本) 逐文件回报"""
+    """把目录打成 zip（内容含目录结构），progress(0~1, 文本) 逐文件回报。
+
+    Windows 磁盘无 unix 执行位，zf.write 会把 external_attr 写成 0——
+    Mac 解压 .app 后启动器/shell 脚本不可执行，双击「无法打开」。
+    对 Contents/MacOS/ 启动器与 .sh/.py 强制 0755；数据文件保持无执行位。
+    """
     import zipfile
     files = [p for p in src_dir.rglob('*') if p.is_file()]
     total = len(files) or 1
@@ -248,7 +273,12 @@ def zip_directory(src_dir: Path, zip_path: Path, progress=None,
         for i, p in enumerate(files, 1):
             if cancel_event is not None and cancel_event.is_set():
                 raise ExportCancelled()
-            zf.write(p, p.relative_to(src_dir))
+            rel = p.relative_to(src_dir)
+            zf.write(p, rel)
+            posix = rel.as_posix()
+            if posix.endswith(('.sh', '.py')) or 'Contents/MacOS/' in posix:
+                zi = zf.filelist[-1]
+                zi.external_attr = (0o100755 << 16) | (zi.external_attr & 0xFFFF)
             if progress and (i % 10 == 0 or i == total):
                 progress(i / total, f'正在打包... ({i}/{total})')
 

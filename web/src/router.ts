@@ -37,6 +37,7 @@ const router = createRouter({
       meta: { needsProject: true },
     },
     { path: '/settings', component: () => import('./pages/SettingsPage.vue') },
+    { path: '/prompts', component: () => import('./pages/PromptsPage.vue') },
   ],
 })
 

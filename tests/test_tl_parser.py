@@ -164,3 +164,91 @@ def test_character_define_variants():
         # 每行新实例：RenpyParser 按变量名跨文件去重
         chars = RenpyParser().extract_characters(line, 'x.rpy')
         assert len(chars) == 1 and chars[0].variable == 'e', line
+
+
+# ---- 官方中文（已译）文件解析：保留官中功能 ----
+
+OFFICIAL_CONTENT = '''\
+# game/script.rpy:39
+translate chinese start_8cba0c84:
+
+    # "Hello world."
+    "你好世界"
+
+# game/script.rpy:40
+translate chinese start_9dcaab85:
+
+    # "Second line."
+    "第二行。"
+
+# game/script.rpy:41
+translate chinese start_aaed3db5:
+
+    # mc.name "Third line."
+    mc.name "第三行。"
+
+# game/script.rpy:42
+translate chinese start_0c268043:
+
+    # "Untranslated line."
+    "Untranslated line."
+
+translate chinese strings:
+
+    # game/options.rpy:20
+    old "Menu Choice"
+    new "菜单选择"
+
+    # game/options.rpy:21
+    old "Empty New"
+    new ""
+'''
+
+
+def _parse_official(tmp_path):
+    tl = tmp_path / 'game' / 'tl' / 'chinese'
+    tl.mkdir(parents=True)
+    (tl / 'script.rpy').write_text(OFFICIAL_CONTENT, encoding='utf-8')
+    from tl_parser import parse_translation_files
+    return parse_translation_files(tmp_path / 'game' / 'tl' / 'chinese', tmp_path)
+
+
+def test_official_dialogue_translation_extracted(tmp_path):
+    """官中文件代码行是译文：必须提取为已译（此前解析丢弃译文、全部入库为待译）"""
+    result = _parse_official(tmp_path)
+    by_text = {d['original_text']: d for d in result['dialogues']}
+    assert by_text['Hello world.']['translated_text'] == '你好世界'
+    assert by_text['Hello world.']['is_translated'] is True
+
+
+def test_official_dotted_speaker_translation(tmp_path):
+    """带点说话人的官中代码行同样提取译文"""
+    result = _parse_official(tmp_path)
+    d = next(d for d in result['dialogues'] if d['original_text'] == 'Third line.')
+    assert d['translated_text'] == '第三行。'
+    assert d['is_translated'] is True
+    assert d['character'] == 'mc'
+
+
+def test_untranslated_stays_untranslated(tmp_path):
+    """代码行与注释原文一致 = 未翻译（SDK 模板回归）"""
+    result = _parse_official(tmp_path)
+    d = next(d for d in result['dialogues'] if d['original_text'] == 'Untranslated line.')
+    assert d['is_translated'] is False
+    assert d['translated_text'] == ''
+
+
+def test_official_strings_new_extracted(tmp_path):
+    """strings 块 new 行是译文：必须提取（此前一律空串）"""
+    result = _parse_official(tmp_path)
+    u = next(u for u in result['ui_texts'] if u['original_text'] == 'Menu Choice')
+    assert u['translated_text'] == '菜单选择'
+    assert u['is_translated'] is True
+
+
+def test_strings_empty_new_untranslated(tmp_path):
+    """new 为空 = 未翻译"""
+    result = _parse_official(tmp_path)
+    u = next(u for u in result['ui_texts'] if u['original_text'] == 'Empty New')
+    assert u['is_translated'] is False
+    assert u['translated_text'] == ''

@@ -42,6 +42,65 @@ def resolve_game_root(game_dir) -> Path:
     return origin
 
 
+def find_app_root(resolved: Path) -> Path | None:
+    """resolve_game_root 的产出是 .app 内 Contents/Resources/autorun 时，
+    返回该 .app 根（供导出套壳快照骨架）；PC 工程等其余布局返回 None。
+
+    只认规范布局：.app/Contents/Resources/autorun——resolve_game_root
+    的产出必满足（同名 autorun 但父链不是 .app 的不误判）。
+    """
+    resolved = Path(resolved)
+    if resolved.name != 'autorun' or len(resolved.parents) < 3:
+        return None
+    app = resolved.parents[2]  # autorun → Resources → Contents → Xxx.app
+    if app.name.endswith('.app') and (app / 'Contents').is_dir():
+        return app
+    return None
+
+
+def sync_app_shell(project_dir: Path, app_root: Path | None,
+                   logger: 'TranslationLogger' = None) -> bool:
+    """快照/清除 macOS 应用壳 app-shell/，返回是否留下壳。
+
+    壳 = .app 中除工程根外的骨架（Info.plist、MacOS 启动器、Resources/
+    python 运行时、图标）——导出时套回，产出解压即可双击的 .app。
+    app_root 为 None（非 mac 来源）时清除旧壳，避免过时骨架被套进导出包。
+    先建 .app-shell.tmp 再整体替换：更新流程中途失败不影响已有壳。
+    """
+    shell = project_dir / 'app-shell'
+    if shell.exists():
+        shutil.rmtree(shell, ignore_errors=True)
+    if app_root is None:
+        if logger:
+            logger.info('来源不是 macOS 应用包，已移除旧应用壳', panel='projects')
+        return False
+
+    tmp_shell = project_dir / '.app-shell.tmp'
+    shutil.rmtree(tmp_shell, ignore_errors=True)
+    skip = ('Contents', 'Resources', 'autorun')  # 工程根随 game/ 走
+    count = 0
+    try:
+        for src in app_root.rglob('*'):
+            rel = src.relative_to(app_root)
+            if rel.parts[:3] == skip:
+                continue
+            dst = tmp_shell / rel
+            if src.is_dir():
+                dst.mkdir(parents=True, exist_ok=True)
+            else:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                count += 1
+    except BaseException:
+        shutil.rmtree(tmp_shell, ignore_errors=True)
+        raise
+    tmp_shell.rename(shell)
+    if logger:
+        logger.info(f'已保留 macOS 应用壳（{count} 个文件，app-shell/）',
+                    panel='projects')
+    return True
+
+
 # tl 模板注释行里的引号说话人：# "Ricardo" "..."（旁白注释只有一个
 # 字符串，要求两个串才不误吞）
 _TL_QUOTED_SPEAKER_RE = re.compile(

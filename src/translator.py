@@ -11,16 +11,17 @@ from typing import List, Optional, Dict, Any, Callable
 
 from llm_client import LLMClient, FatalAPIError  # noqa: F401  (FatalAPIError 供旧路径 import)
 import markup_check
+import prompt_store
 from prompts import (
-    ANALYSIS_SYSTEM_PROMPT,
-    STYLE_GUIDE_PROMPT,
     build_batch_user_prompt,
     build_name_system_prompt,
     build_name_user_prompt,
+    build_style_guide_prompt,
     build_system_prompt,
     build_ui_system_prompt,
     build_ui_user_prompt,
     build_user_prompt,
+    get_analysis_system_prompt,
 )
 from token_budget import TokenBudget, count_tokens
 
@@ -230,8 +231,8 @@ class AITranslator:
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt +
-                     '\n\n【必须修正】上一版译文未通过校验：'
-                     + '；'.join(probs)},
+                     prompt_store.render(
+                         'retry.must_fix', problems='；'.join(probs))},
                 ],
                 temperature=_MARKUP_FIX_TEMPERATURE,
                 max_tokens=self.config.max_tokens,
@@ -361,8 +362,8 @@ class AITranslator:
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt +
-                     '\n\n【必须修正】上一版译文未通过校验：'
-                     + '；'.join(probs)},
+                     prompt_store.render(
+                         'retry.must_fix', problems='；'.join(probs))},
                 ],
                 temperature=_MARKUP_FIX_TEMPERATURE,
                 max_tokens=self.config.max_tokens,
@@ -590,7 +591,8 @@ class AITranslator:
                         base = it.get('hint') or ''
                         it['hint'] = (
                             (base + '；' if base else '')
-                            + f'上一版译文未通过校验，必须修正：{reason}')
+                            + prompt_store.render(
+                                'retry.batch_hint', reason=reason))
                         retry_items.append(it)
                     send_items = retry_items
                     send_map = failing
@@ -633,7 +635,7 @@ class AITranslator:
 
         return self._call_api(
             messages=[
-                {"role": "system", "content": ANALYSIS_SYSTEM_PROMPT},
+                {"role": "system", "content": get_analysis_system_prompt()},
                 {"role": "user", "content": prompt}
             ],
             temperature=(self.config.temperature if temperature is None
@@ -646,7 +648,7 @@ class AITranslator:
         """根据台词抽样生成作品风格指南"""
         if not sample_text.strip():
             return ""
-        return self.analyze_text(STYLE_GUIDE_PROMPT.format(sample=sample_text))
+        return self.analyze_text(build_style_guide_prompt(sample_text))
 
     def test_connection(self) -> Dict[str, Any]:
         """测试API连接"""

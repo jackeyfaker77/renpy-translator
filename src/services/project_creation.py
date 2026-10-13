@@ -9,7 +9,9 @@
     result = await creator.create(
         name, game_dir,
         progress=lambda pct, text: ...,                    # 同步回调
-        confirm_official_chinese=async def (file_count) -> bool,
+        confirm_official_chinese=async def (file_count) -> str,
+            返回 'delete'（删除官中重译）/ 'keep'（保留官中续译）/
+            'cancel'（取消创建）；旧布尔契约 True/False 等价 delete/cancel,
     )
 返回 {'success': True, 'dialogues': n, 'ui_texts': m} 或 {'cancelled': True}。
 异常：抛出前已关闭 db（否则 Windows 上清理目录 WinError 32）。
@@ -28,8 +30,8 @@ from logger import TranslationLogger
 from project_manager import ProjectManager
 from services.game_pipeline import (  # noqa: F401（_unrpyc_python_exe/copy_game_files 为兼容旧导入再导出）
     _unrpyc_python_exe, copy_game_files, copy_with_progress,
-    locate_ui_hints, refresh_characters, resolve_game_root,
-    resolve_sdk_or_raise, unpack_and_decompile,
+    find_app_root, locate_ui_hints, refresh_characters, resolve_game_root,
+    resolve_sdk_or_raise, sync_app_shell, unpack_and_decompile,
 )
 
 # 中文相关语言目录名（小写匹配）
@@ -79,6 +81,65 @@ def remove_official_chinese(game_work_dir: Path, logger: TranslationLogger = Non
             except OSError as e:
                 if logger:
                     logger.warning(f'删除中文目录失败 {lang_dir.name}: {e}', panel='projects')
+
+
+def normalize_official_chinese(game_work_dir: Path,
+                               logger: TranslationLogger = None) -> str | None:
+    """保留官中时归一语言目录：非 chinese 的中文目录改名为 chinese。
+
+    SDK 只生成 tl/chinese、导出与运行时也只认 chinese——官方译文若在
+    schinese/zh 等目录，改名归并后才能被 SDK 追加与解析入库。
+    已存在 chinese 时不改名（避免覆盖），返回 None；改名成功返回原目录名。
+    """
+    tl_root = game_work_dir / 'game' / 'tl'
+    if not tl_root.exists():
+        return None
+    chinese = tl_root / 'chinese'
+    for lang_dir in sorted(tl_root.iterdir()):
+        if not lang_dir.is_dir() or lang_dir.name == 'chinese':
+            continue
+        if lang_dir.name.lower() not in CHINESE_LANG_NAMES:
+            continue
+        if chinese.exists():
+            if logger:
+                logger.warning(
+                    f'同时存在多个中文翻译目录（chinese 与 {lang_dir.name}），'
+                    f'保留官中仅使用 chinese，{lang_dir.name} 保持原样',
+                    panel='projects')
+            continue
+        lang_dir.rename(chinese)
+        if logger:
+            logger.info(f'保留官中：tl/{lang_dir.name} 归并为 tl/chinese',
+                        panel='projects')
+        return lang_dir.name
+    return None
+
+
+def dedupe_translations(result: dict) -> dict:
+    """去掉「同 (file, 原文) 已有已译行」的未译重复块。
+
+    Ren'Py 以 identifier 决定是否重生成：保留官中重跑 SDK 时若
+    identifier 与官方失配（反编译源码摘要差异），会给已译块追加一条
+    空译副本——同文件同原文存在已译行时丢弃未译行。两侧都已译
+    （原文重复的真实台词）或都未译（原文重复的两处台词）则都保留。
+    """
+    def _dedupe(rows: list) -> list:
+        translated_keys = {
+            (r.get('file_path', ''), r.get('original_text', ''))
+            for r in rows if r.get('translated_text')
+        }
+        return [
+            r for r in rows
+            if not (r.get('translated_text') == ''
+                    and (r.get('file_path', ''), r.get('original_text', ''))
+                    in translated_keys)
+        ]
+
+    return {
+        **result,
+        'dialogues': _dedupe(result.get('dialogues', [])),
+        'ui_texts': _dedupe(result.get('ui_texts', [])),
+    }
 
 
 def cleanup_conflicts(game_dir: Path, logger: TranslationLogger = None):
@@ -255,7 +316,9 @@ def parse_tl_dir(tl_dir: Path, game_work_dir: Path,
                  logger: TranslationLogger) -> dict:
     """解析 SDK 生成的 tl/chinese 目录（同步，调用方放 executor）"""
     from tl_parser import parse_translation_files
-    return parse_translation_files(tl_dir, str(game_work_dir), logger=logger)
+    result = parse_translation_files(tl_dir, str(game_work_dir), logger=logger)
+    # 保留官中重跑时 identifier 失配会追加未译副本，按 (file, 原文) 去重
+    return dedupe_translations(result)
 
 
 class ProjectCreator:
@@ -272,7 +335,8 @@ class ProjectCreator:
                      progress, confirm_official_chinese=None,
                      cancel_event=None) -> dict:
         """执行创建。progress(pct, text) 同步回调；confirm_official_chinese
-        为 async (file_count) -> bool（True=删除官中继续，False=取消创建）。
+        为 async (file_count) -> str：'delete' 删除官中重译、'keep' 保留
+        官中续译、'cancel' 取消创建（旧布尔 True/False 等价 delete/cancel）。
         cancel_event: 可选 threading.Event，传给 SDK 子进程以便中止。
 
         用户取消：关闭 db、删除项目目录，返回 {'cancelled': True}。
@@ -282,7 +346,10 @@ class ProjectCreator:
         db = None
         # macOS .app 发行包顶层不是工程根（game/ 在 Contents/Resources/
         # autorun 下），先定位真根再建库/复制——否则下游全程找不到 game/
-        game_dir = str(resolve_game_root(game_dir))
+        # 顺带记录 .app 壳位置：导出时把骨架快照套回，产出可双击的 .app
+        resolved_root = resolve_game_root(game_dir)
+        app_root = find_app_root(resolved_root)
+        game_dir = str(resolved_root)
         try:
             # 步骤1: 创建项目数据库
             progress(0.05, '正在初始化项目...')
@@ -291,6 +358,10 @@ class ProjectCreator:
                 self.project_manager.create_project, name, game_dir
             )
             project_dir = self.project_manager.project_dir(name)
+            if app_root:
+                progress(0.055, '正在保留 macOS 应用壳...')
+                await _rie(sync_app_shell, project_dir, app_root,
+                           self.logger)
             game_work_dir = project_dir / 'game'
 
             # 步骤2: 复制游戏文件（逐文件复制，带进度）
@@ -303,15 +374,20 @@ class ProjectCreator:
             rel_files = await unpack_and_decompile(
                 _rie, game_work_dir, db, self.logger, progress)
 
-            # 步骤3.5: 检测官方中文翻译，确认后删除（否则与 SDK 模板重复入库）
+            # 步骤3.5: 检测官方中文翻译，确认后处理（删除重译 / 保留续译）
             # 必须在解包后（官中可能在 rpa 里）、SDK 生成前检测
             official_tl = await _rie(detect_official_chinese, game_work_dir)
             if official_tl:
                 progress(0.50, '检测到游戏自带中文翻译...')
                 if confirm_official_chinese is None:
                     raise RuntimeError('检测到官方中文翻译但未提供确认回调')
-                use_sdk = await confirm_official_chinese(official_tl)
-                if not use_sdk:
+                action = await confirm_official_chinese(official_tl)
+                # 兼容旧布尔契约：True=删除继续，False=取消
+                if action is True:
+                    action = 'delete'
+                elif action is False:
+                    action = 'cancel'
+                if action == 'cancel':
                     # 用户取消：关闭 db、删除已生成的项目目录
                     progress(0.50, '已取消创建')
                     await _rie(db.close)
@@ -319,9 +395,20 @@ class ProjectCreator:
                     await _rie(self.project_manager.delete_project, name)
                     self.logger.info('用户取消创建：检测到游戏自带中文翻译', panel='projects')
                     return {'cancelled': True}
-                progress(0.50, '正在删除官方中文翻译...')
-                await _rie(remove_official_chinese, game_work_dir, self.logger)
-                self.logger.info(f'已删除官方中文翻译（{official_tl} 个文件）', panel='projects')
+                if action == 'delete':
+                    progress(0.50, '正在删除官方中文翻译...')
+                    await _rie(remove_official_chinese, game_work_dir, self.logger)
+                    self.logger.info(f'已删除官方中文翻译（{official_tl} 个文件）', panel='projects')
+                else:
+                    # 保留官中：语言目录归一到 chinese，SDK 追加未译条目，
+                    # 官方译文经 parse_tl_dir 直接入库为已译
+                    progress(0.50, '保留官方中文翻译，继续...')
+                    renamed = await _rie(normalize_official_chinese,
+                                          game_work_dir, self.logger)
+                    msg = f'保留官方中文翻译（{official_tl} 个文件）'
+                    if renamed:
+                        msg += f'，tl/{renamed} 归并为 tl/chinese'
+                    self.logger.info(msg, panel='projects')
 
             # 步骤4: SDK 生成翻译文件（自愈重试）
             sdk_path = await resolve_sdk_or_raise(

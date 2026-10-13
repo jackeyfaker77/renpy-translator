@@ -1,12 +1,13 @@
 <script setup lang="ts">
 /** 导出游戏页：统计 + 一键导出（任务进度走全局对话框） */
 import { computed, onMounted, ref } from 'vue'
-import { NAlert, NButton, NCard, NPopconfirm, NSpace, NText, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NCheckbox, NPopconfirm, NSpace, NText, useMessage } from 'naive-ui'
 import { FolderOpenOutline, PlayOutline, RefreshOutline } from '@vicons/ionicons5'
 import { api, toastError } from '../api/client'
 import { renderIcon } from '../components/icons'
 import MarkupIssuesDialog from '../components/MarkupIssuesDialog.vue'
 import ProgressLine from '../components/ProgressLine.vue'
+import PageHelp from '../components/PageHelp.vue'
 import { useJobsStore } from '../stores/jobs'
 import { useSessionStore } from '../stores/session'
 
@@ -30,10 +31,13 @@ interface ExportInfo {
   percent: number
   markup_issues: { count: number; samples: MarkupIssue[] }
   exports_dir: string
+  has_shell: boolean
 }
 
 const info = ref<ExportInfo | null>(null)
 const showMarkupDialog = ref(false)
+/** macOS 项目导出带 .app 壳（默认带；无壳项目此值无意义） */
+const withShell = ref(true)
 
 /** 未翻译条数（>0 时导出前弹确认提醒） */
 const untranslated = computed(() =>
@@ -49,7 +53,8 @@ async function load() {
 
 async function startExport() {
   try {
-    const data = await api.post<{ job_id: string }>('/api/current/export/game')
+    const data = await api.post<{ job_id: string }>('/api/current/export/game',
+      { shell: withShell.value })
     jobsStore.track(data.job_id)
   } catch (e) {
     toastError(message, e)
@@ -70,8 +75,9 @@ onMounted(load)
 
 <template>
   <div>
-    <n-space align="center" style="margin-bottom: 12px">
+    <n-space align="center" style="width: 100%; margin-bottom: 12px">
       <h2 style="margin: 0">导出游戏</h2>
+      <page-help style="margin-left: auto" :section="'10'" />
       <n-popconfirm v-if="untranslated > 0" @positive-click="startExport">
         <template #trigger>
           <n-button size="small" type="primary" :render-icon="renderIcon(PlayOutline)">开始导出</n-button>
@@ -86,6 +92,10 @@ onMounted(load)
       <n-button v-if="info" size="small" :render-icon="renderIcon(FolderOpenOutline)" @click="revealExports">
         打开导出目录
       </n-button>
+      <n-checkbox
+        v-if="info && info.has_shell" v-model:checked="withShell"
+        style="margin-left: 8px"
+      >带 macOS 应用壳（解压后可双击运行）</n-checkbox>
     </n-space>
     <n-text depth="3" style="font-size: 12px">
       导出为 {{ session.currentProject }}-translated.zip（与项目包同目录），解压即可运行

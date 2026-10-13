@@ -116,15 +116,30 @@ def _parse_dialogue_blocks(lines, tl_file, game_path, dialogues, ui_texts):
                 if i < len(lines):
                     i += 1
                 continue
+            # 下一行是代码行：SDK 生成的未翻译模板里它与注释原文一致，
+            # 官方中文（保留官中）文件里它是译文——两种都解析，按与原文
+            # 是否相同判定已译（说话人/引号形式与注释同一套正则）
+            trans_text = ''
             if i < len(lines):
+                code_line = lines[i]
                 i += 1
+                code_char = re.match(
+                    r'^\s*(?:"((?:[^"\\]|\\.)*)"|([\w.\[\]]+))'
+                    r'\s+"((?:[^"\\]|\\.)*)', code_line)
+                code_narr = re.match(r'^\s*"((?:[^"\\]|\\.)*)"', code_line)
+                if code_char:
+                    trans_text = code_char.group(3).replace('\\"', '"')
+                elif code_narr:
+                    trans_text = code_narr.group(1).replace('\\"', '"')
+            is_translated = bool(trans_text) and trans_text != text
 
             full_path = str(game_path / 'game' / current_file)
             entry = {
                 'file_path': full_path, 'line_number': current_line_no,
                 'label': current_label,
                 'character': character, 'original_text': text,
-                'translated_text': '', 'is_translated': False,
+                'translated_text': trans_text if is_translated else '',
+                'is_translated': is_translated,
             }
             # 只按文件名判断是否为界面文本文件，避免目录名（如 *_screens/）误判
             file_name = current_file.replace('\\', '/').rsplit('/', 1)[-1]
@@ -165,12 +180,16 @@ def _parse_strings_block(lines, tl_file, game_path, ui_texts):
             continue
         new_match = re.match(r'^\s+new\s+"(.*)"', line)
         if new_match and current_old is not None:
+            # new 行是译文：空串 = 未翻译（SDK 模板），非空 = 已有译文
+            # （官方中文保留）
+            new_text = new_match.group(1).replace('\\"', '"')
             full_path = str(game_path / 'game' / current_file) if current_file else ''
             entry = {
                 'file_path': full_path, 'line_number': current_line or 0,
                 'label': '',
                 'character': '', 'original_text': current_old,
-                'translated_text': '', 'is_translated': False,
+                'translated_text': new_text if new_text else '',
+                'is_translated': bool(new_text),
             }
             ui_texts.append(entry)
             current_old = None

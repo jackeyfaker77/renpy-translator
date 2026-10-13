@@ -31,6 +31,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // 允许 ?raw 引入仓库根 docs/（使用说明.md——帮助弹窗与说明书同一内容源）
+    fs: {
+      allow: ['..'],
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:7861',

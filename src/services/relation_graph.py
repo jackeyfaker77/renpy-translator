@@ -13,6 +13,7 @@ AI 重算只替换 source != 'manual' 的边，人工编辑保留。
 """
 
 import json
+import prompt_store
 import re
 import threading
 from itertools import combinations
@@ -27,32 +28,7 @@ CATEGORIES = {'family', 'romantic', 'friendly', 'hostile',
               'master_servant', 'work', 'other'}
 POLARITIES = {'positive', 'negative', 'mixed'}
 
-_PROMPT = """你是视觉小说剧情分析专家。以下是游戏《{game}》的角色清单（JSON 数组），每项含：
-- name: 角色显示名
-- cn: 中文译名（可能为空）
-- lines: 台词数
-- profile: 已有的角色分析档案（可能为空，含性格/背景/人物关系描述）
-
-请输出一个 JSON 对象，含两个字段：
-
-1. relations: 角色关系数组，每项：
-   - source: 角色显示名（必须与清单中的 name 完全一致）
-   - target: 另一角色显示名
-   - relation: 关系短语（如 母女、师生、恋人、上司下属、情敌、主仆）
-   - category: 关系类别，必须是以下之一：family(血缘/亲属) romantic(恋爱/暧昧/夫妻) friendly(友情/同伴) hostile(敌对/仇怨/竞争) master_servant(主从/上下级) work(同事/师生/职业关系) other
-   - polarity: 情感极性，positive(亲近/友善) negative(敌视/厌恶) mixed(复杂/亦敌亦友) 之一
-   - description: 一句话关系描述（基于档案推断，不确定的标注"推测"）
-
-2. factions: 角色阵营/团体数组，每项：
-   - name: 角色显示名
-   - faction: 所属阵营/团体/家族/组织的简称（如"学生会""反抗军""主角团"；不属于任何团体填 ""）
-
-只输出有实际关系的角色对，同义反复/纯路人不要输出。关系方向尽量语义自然
-（source 是 relation 的主语方，如 source=母亲 target=女儿 relation=母女）。
-只输出 JSON 对象，不要输出任何其他文字。
-
-角色清单：
-{chars_json}"""
+# 提示词模板在 prompt_store（relation.prompt / relation.head，可自定义）
 
 # prompt 缓存优化（与翻译批同一原理：DeepSeek/OpenAI 按 token 0 严格前缀
 # 匹配，命中 ~0.1x 计价）：全量花名册作为所有批次共享的常量前缀，批次间
@@ -60,37 +36,7 @@ _PROMPT = """你是视觉小说剧情分析专家。以下是游戏《{game}》�
 # 花名册超大时（>400 角色）退回逐批独立提示词（前缀收益不敌上下文膨胀）
 _ROSTER_PREFIX_MAX = 400
 
-_HEAD = """你是视觉小说剧情分析专家。以下是游戏《{game}》的完整角色清单（JSON 数组），每项含：
-- name: 角色显示名
-- cn: 中文译名（可能为空）
-- lines: 台词数
-- profile: 已有的角色分析档案（可能为空，含性格/背景/人物关系描述）
 
-请输出一个 JSON 对象，含两个字段：
-
-1. relations: 角色关系数组，每项：
-   - source: 角色显示名（必须与清单中的 name 完全一致）
-   - target: 另一角色显示名
-   - relation: 关系短语（如 母女、师生、恋人、上司下属、情敌、主仆）
-   - category: 关系类别，必须是以下之一：family(血缘/亲属) romantic(恋爱/暧昧/夫妻) friendly(友情/同伴) hostile(敌对/仇怨/竞争) master_servant(主从/上下级) work(同事/师生/职业关系) other
-   - polarity: 情感极性，positive(亲近/友善) negative(敌视/厌恶) mixed(复杂/亦敌亦友) 之一
-   - description: 一句话关系描述（基于档案推断，不确定的标注"推测"）
-
-2. factions: 角色阵营/团体数组，每项：
-   - name: 角色显示名
-   - faction: 所属阵营/团体/家族/组织的简称（如"学生会""反抗军""主角团"；不属于任何团体填 ""）
-
-只输出有实际关系的角色对，同义反复/纯路人不要输出。关系方向尽量语义自然
-（source 是 relation 的主语方，如 source=母亲 target=女儿 relation=母女）。
-只输出 JSON 对象，不要输出任何其他文字。
-
-完整角色清单：
-{roster_json}
-
-请只针对以下角色推断他们与清单中任意角色的关系（factions 也只需覆盖他们）："""
-
-# 花名册超大时的逐批回退提示词（同原 _PROMPT 结构）
-_FALLBACK_PROMPT = _PROMPT
 
 
 def _char_key(c: dict) -> str:
@@ -118,11 +64,8 @@ def _call_ai(translator, chars: list, game_name: str,
     prompt 缓存：花名册常量前缀共享（见 _ROSTER_PREFIX_MAX），
     命中量经 translator.cache_stats_delta 观测"""
     use_roster = 1 < len(chars) <= _ROSTER_PREFIX_MAX
-    roster_prefix = ''
-    if use_roster:
-        roster_prefix = _HEAD.format(
-            game=game_name,
-            roster_json=json.dumps(chars, ensure_ascii=False))
+    # 花名册常量前缀一次算好；本批名字走模板尾部占位（缓存契约：前缀稳定）
+    roster_json = json.dumps(chars, ensure_ascii=False) if use_roster else ''
 
     edges = []
     factions = {}
@@ -136,10 +79,12 @@ def _call_ai(translator, chars: list, game_name: str,
                      f'（角色 {start + 1}-{start + len(batch)}/{len(chars)}）')
         if use_roster:
             names = [c['name'] for c in batch]
-            prompt = roster_prefix + json.dumps(names, ensure_ascii=False)
+            prompt = prompt_store.render(
+                'relation.head', game=game_name, roster_json=roster_json,
+                batch_names_json=json.dumps(names, ensure_ascii=False))
         else:
-            prompt = _FALLBACK_PROMPT.format(
-                game=game_name,
+            prompt = prompt_store.render(
+                'relation.prompt', game=game_name,
                 chars_json=json.dumps(batch, ensure_ascii=False))
         # 风控/偶发解析失败重试（每次真实重新调用，与同批翻译口径一致）
         parsed = None

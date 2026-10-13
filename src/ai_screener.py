@@ -11,6 +11,8 @@ search_code 工具自由查看源码（多轮循环，上限 10 轮），最后 
 """
 
 import json
+
+import prompt_store
 import random
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -53,96 +55,9 @@ _TOOLS = [
 ]
 
 # 粗筛提示词三变体（任务等价、措辞不同）：票间去相关性来自输入差异
-# （确定性洗牌 + 变体），而非温度——判定任务全部 temperature=0
-_COARSE_PROMPT_A = """你是游戏本地化专家。以下是从 Ren'Py 游戏源码扫描出的字符串候选（JSON 数组），每条含：
-- text: 候选原文
-- hint/kind: 出处类型（screen=屏幕语言, python=脚本数据）
-- evidence: 静态分析给出的出现点用途全景（哪些位置是显示用途、哪些是比较/键名/资源用途）——这是确定性扫描的结果，可信
-- code: 出处周边的代码片段（带行号）
-- warning（可选）: 静态分析发现该字符串另有非显示用途——不影响翻译（选中后默认写入翻译表，逻辑代码仍用原文值），仅提示你需要更谨慎地判断它是否会被玩家读到
-
-请逐条判断它是否是【玩家可见、应当翻译的显示文本】：
-- keep=true：界面文字、按钮、提示、叙事/消息/帖子内容等玩家直接读到的文本
-- keep=false：内部标识符、键名、技术串、格式模板、代码用字符串、资源名称、纯数字或时间标记
-- reason：一句话中文说明判定依据
-
-【kind=fstring 的候选是 f-string 模板】：{{0}}/{{1}} 是 Python 插值占位，
-[x] 是 Ren'Py 插值。导出时程序会机械替换插值并**单独翻译插值内容**——
-判断时不要把模板当字面内容，应看插值的内容是否会在屏幕上显示：
-插值是人名/标题/属性名/描述等显示文本 → keep=true（即使模板本身
-没有可译文字）；插值是键名/内部值 → keep=false。
-
-候选：
-{items_json}
-
-只输出 JSON 数组，不要输出任何其他文字：[{{"id": 1, "keep": true, "reason": "界面按钮文字"}}, ...]"""
-
-_COARSE_PROMPT_B = """你在为一款 Ren'Py 游戏做汉化前置审查。下面 JSON 数组里的字符串都没有包翻译标记，需要判断哪些该补标。每条字段：
-- text 候选原文；hint/kind 出处（screen 界面 / python 脚本）
-- evidence 静态扫描的出现点全景：这串在源码里还被用在哪、是什么用途（显示=展示给玩家；比较/键名/索引=逻辑用途）——机械扫描结果，可以直接采信
-- code 出现位置前后的代码（带行号）
-- warning（可选）这串另有逻辑用途——不影响翻译（逻辑代码仍用原文值），只是提醒你要更谨慎判断它是否会被玩家读到
-
-判定标准：
-- 玩家能在游戏画面里读到的（界面、按钮、通知、消息、叙事）→ keep=true
-- 程序内部使用的（标识符、键、路径、格式串、资源名、纯数字时间）→ keep=false
-- 每条给出一句中文 reason
-
-【kind=fstring 的是 f-string 模板】：{{0}}/{{1}} 是 Python 插值占位、[x] 是
-Ren'Py 插值，程序导出时会机械替换并**单独翻译插值内容**——所以模板本身
-没有可译文字不代表 keep=false：插值内容会在屏幕上显示（人名/标题/属性/
-描述）→ keep=true；插值是键名/内部值 → keep=false。
-
-候选：
-{items_json}
-
-只输出 JSON：[{{"id": 1, "keep": true, "reason": "..."}}, ...]，不要输出其他内容"""
-
-_COARSE_PROMPT_C = """任务：Ren'Py 游戏内嵌字符串的翻译价值判定。
-
-输入：JSON 数组，每条是一个从源码提取的字符串，含 text（原文）、hint/kind（出处）、
-evidence（静态分析的出现点用途统计，确定性结果）、code（周边代码）。
-部分条目带 warning（另有非显示用途的提示——不影响翻译，逻辑代码仍用原文值，仅提醒你更谨慎判断）。
-
-输出：对每条给出 keep（true=玩家可见应翻译 / false=内部串不翻译）与一句中文 reason。
-判断核心问题只有一个：玩家玩游戏时会在屏幕上读到这段文字吗？
-- 会读到（界面文字/按钮/提示/通知/消息/叙事内容）→ true
-- 不会（键名/标识符/路径/格式模板/资源名/代码标记）→ false
-- kind=fstring 的是 f-string 模板：{{0}} 是 Python 插值占位、[x] 是 Ren'Py
-  插值，程序会机械替换并单独翻译插值内容——模板无可译文字 ≠ false；
-  插值内容会在屏幕显示（人名/标题/属性/描述）→ true，内部值 → false
-
-候选：
-{items_json}
-
-仅输出 JSON 数组：[{{"id": 1, "keep": false, "reason": "..."}}, ...]"""
-
-_COARSE_PROMPT_VARIANTS = (
-    _COARSE_PROMPT_A, _COARSE_PROMPT_B, _COARSE_PROMPT_C)
-
-_REFINE_SYSTEM = """你在审查 Ren'Py 游戏源码中提取的字符串候选，判断哪些是【玩家可见、应当翻译的文本】。
-
-规则：
-- keep=true：界面文字、按钮、提示、叙事/消息/帖子内容等玩家直接读到的文本
-- keep=false：内部标识符、字典键名、技术串、格式模板、变量占位、代码用字符串、资源名称、纯数字或时间标记
-- kind=fstring 的候选是 f-string 模板：{0}/{1} 是 Python 插值占位、[x] 是
-  Ren'Py 插值，程序导出时机械替换并**单独翻译插值内容**——模板本身没有
-  可译文字不代表 keep=false；插值内容会在屏幕显示（人名/标题/属性/描述）
-  → keep=true，插值是键名/内部值 → keep=false
-- 候选若带 evidence 字段，那是静态分析的出现点用途全景（确定性扫描，可直接采信）：多数条目据此即可判定，submit_verdicts 的 evidence 可引用这些出现点位置
-- 候选若带 warning 字段，说明它另有比较/键名/资源用途——这不妨碍翻译（选中后默认写入翻译表，逻辑代码仍用原文值），你要核实的只是它是否真的会被玩家读到
-- 需要用工具的情形：evidence 与代码片段矛盾、信息不足、或 keep/drop 关键抉择证据不够。trace_symbol 看变量流向（定义点+引用点分类），search_code 查字符串使用位置（带上下文），read_code 读完整代码段
-- 【必须批量查询】每一轮都要并行发起多个工具调用（一次查多个字符串/多个文件段），不允许一轮只查一处——逐条单独查询会在轮数上限前耗光查询预算。例外：只剩最后一个疑点时可以单查
-- 完成所有判断后，调用 submit_verdicts 一次性提交本批全部判定：reason 用一句话中文说明依据，evidence 填判定依据的代码位置（file:line，可引用 evidence 出现点或工具新查到的，多个用空格分隔）"""
-
-# 灰区复核锚定段（anchored 模式追加）：复核目的是纠错，不是重猜
-_ANCHOR_SECTION = """
-
-【复核模式】本批每条候选都带 prior_verdict / prior_reason 字段，是上轮判定的结论与理由。
-复核的目的是纠错，不是重新猜测：
-- 逐条对照 evidence 与上轮理由——不矛盾的直接维持原判，无需调用任何工具（多数条目应如此）
-- 只有当你有具体理由怀疑上轮判错时，才用工具取证；翻转必须在 evidence 中引用 file:line
-- 查不到矛盾证据就等于维持原判——不要为了"完成核实"而反复搜索，目标是在 2 轮以内提交"""
+# （确定性洗牌 + 变体），而非温度——判定任务全部 temperature=0。
+# 模板正文在 prompt_store（可自定义），三变体须保持互异
+_COARSE_IDS = ('screener.coarse_a', 'screener.coarse_b', 'screener.coarse_c')
 
 
 class ScreeningCancelled(Exception):
@@ -403,10 +318,10 @@ class AIScreener:
         order = list(batch)
         random.Random(vote_idx).shuffle(order)
         items_json = json.dumps(order, ensure_ascii=False)
-        prompt = _COARSE_PROMPT_VARIANTS[
-            vote_idx % len(_COARSE_PROMPT_VARIANTS)]
+        prompt = prompt_store.render(
+            _COARSE_IDS[vote_idx % len(_COARSE_IDS)], items_json=items_json)
         result = self.translator.analyze_text(
-            prompt.format(items_json=items_json),
+            prompt,
             max_tokens=max(self.translator.config.max_tokens, 8000),
             temperature=0)
         m = re.search(r'\[.*\]', result, re.S)
@@ -561,7 +476,9 @@ class AIScreener:
                 item['prior_reason'] = anchored[idx]['reason']
             items.append(item)
 
-        system = _REFINE_SYSTEM + (_ANCHOR_SECTION if anchored else '')
+        system = (prompt_store.render('screener.refine_system')
+                  + (prompt_store.render('screener.anchor_section')
+                     if anchored else ''))
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content":
@@ -602,12 +519,12 @@ class AIScreener:
                     messages.append(message)
                     for tc in message.tool_calls:
                         if tc is submit:
-                            content = (
-                                f'已受理 {len(accepted)}/{len(id_map)} 条判决。'
-                                + (f'注意：上次提交参数有误（{err}）。'
-                                   if err else '')
-                                + f'还缺 id {missing} 的判决，请再次调用 '
-                                  'submit_verdicts 补齐（只需提交缺失的 id）。')
+                            content = prompt_store.render(
+                                'screener.verdict_partial_followup',
+                                accepted_count=len(accepted),
+                                total_count=len(id_map),
+                                err_note=err or '',
+                                missing_ids=missing)
                         else:
                             # 同一条 message 的其他工具调用必须有响应，
                             # 否则下一轮请求会被 API 拒绝
@@ -642,16 +559,15 @@ class AIScreener:
                     return accepted
                 messages.append(message)
                 messages.append({"role": "user", "content":
-                    f'判决不完整，还缺 id {missing}。'
-                    '请调用 submit_verdicts 工具提交这些候选的判定。'})
+                    prompt_store.render('screener.verdict_text_followup',
+                                        missing_ids=missing)})
 
         # 达到轮数上限：强制要求用纯文本输出判决，再做最后一轮解析
         missing = [n for n, idx in id_map.items() if idx not in accepted]
         self._log(f'精审批次达到 {self.MAX_ROUNDS} 轮上限，要求立即提交')
         messages.append({"role": "user", "content":
-            '轮数已达上限。请立即基于已有信息输出最终判决 JSON 数组'
-            '（[{"id":N,"keep":true/false,"reason":"..."}]），不要再调用工具。'
-            + (f'只需输出还缺判决的 id: {missing}。' if accepted else '')})
+            prompt_store.render('screener.round_limit_force',
+                                missing_ids=missing if accepted else '')})
         message = self.translator.chat_completion(
             messages=messages,
             # 判定任务固定 0 温度（理由同多轮循环）：重判可复现

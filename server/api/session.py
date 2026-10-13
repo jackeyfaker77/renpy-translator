@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from ..deps import get_state, require_project
+from ..errors import ApiError
 from ..state import AppState
 
 router = APIRouter(tags=['session'])
@@ -34,6 +35,11 @@ async def get_session(state: AppState = Depends(get_state)):
 
 @router.post('/session/open')
 async def open_project(req: OpenRequest, state: AppState = Depends(get_state)):
+    # 有在飞任务时拒绝切换：换项目会关旧库/拆服务，任务还在用旧库跑，
+    # 而提示词覆盖等会话态会切到新项目——两头受污染
+    if state.app_db.list_jobs(active_only=True):
+        raise ApiError(409, 'JOBS_ACTIVE',
+                       '还有任务正在执行，请等待完成或取消后再切换项目')
     await state.open_project(req.name)
     return {
         'current_project': state.current_project,

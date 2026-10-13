@@ -101,16 +101,20 @@ def _make_create_body(state: AppState, name: str,
             creator = ProjectCreator(state.project_manager, state.logger,
                                      _sdk_path_getter(state))
 
-            async def _confirm(count: int) -> bool:
+            async def _confirm(count: int) -> str:
                 ans = await job.ask('confirm', {
                     'title': '检测到游戏自带中文翻译',
                     'body': f'该游戏的 tl 目录下已存在中文翻译（{count} 个文件），'
                             '可能是官方中文或第三方汉化。\n\n'
-                            '如果保留，其中的译文会与 SDK 生成的待翻译模板重复导入，'
-                            '导致对话条目翻倍、翻译混乱。\n\n'
-                            '建议删除该中文目录，使用 SDK 模板重新翻译。',
+                            '删除官中：移除该中文目录，用 SDK 模板重新翻译。\n'
+                            '保留官中：把已有译文导入为已翻译条目，在此基础上继续翻译。',
+                    'keep_label': '保留官中继续翻译',
                 })
-                return bool(ans.get('ok'))
+                action = ans.get('action')
+                if action in ('delete', 'keep', 'cancel'):
+                    return action
+                # 兼容旧布尔答案：True=删除继续，False=取消
+                return 'delete' if ans.get('ok') else 'cancel'
 
             # 进度回调即取消检查点：复制完成、SDK 生成模板、解析入库等
             # 各阶段之间都会经过这里，取消后不会继续把项目建完
@@ -291,16 +295,20 @@ def _make_update_body(state: AppState, name: str,
             if was_current:
                 await state.close_project()
 
-            async def _confirm(count: int) -> bool:
+            async def _confirm(count: int) -> str:
                 ans = await job.ask('confirm', {
                     'title': '新版本自带中文翻译',
                     'body': f'新版本的 tl 目录下已存在中文翻译（{count} 个文件），'
                             '可能是官方中文或第三方汉化。\n\n'
-                            '如果保留，其中的译文会与继承的译文及 SDK 模板重复，'
-                            '导致对话条目翻倍、翻译混乱。\n\n'
-                            '建议删除该中文目录，继续使用现有翻译。',
+                            '删除官中：移除该中文目录，继续使用现有翻译。\n'
+                            '保留官中：把新包已有译文导入，在此基础上继续翻译。',
+                    'keep_label': '保留官中继续翻译',
                 })
-                return bool(ans.get('ok'))
+                action = ans.get('action')
+                if action in ('delete', 'keep', 'cancel'):
+                    return action
+                # 兼容旧布尔答案：True=删除继续，False=取消
+                return 'delete' if ans.get('ok') else 'cancel'
 
             updater = ProjectUpdater(state.project_manager, state.logger,
                                      _sdk_path_getter(state))

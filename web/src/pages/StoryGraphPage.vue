@@ -18,6 +18,7 @@ import { api, toastError } from '../api/client'
 import { renderIcon } from '../components/icons'
 import { GT } from '../components/graph-theme'
 import { MiniMap, makeChart } from '../components/echarts-utils'
+import PageHelp from '../components/PageHelp.vue'
 import { useJobsStore } from '../stores/jobs'
 
 interface ApiScene {
@@ -1156,6 +1157,7 @@ function speakersOfFull(s: ApiScene) {
             <n-switch v-model:value="engineRender" size="small" />
             <n-text depth="3" style="font-size: 12px">引擎渲染（实验）</n-text>
           </n-space>
+          <page-help :section="'8'" />
         </n-space>
       </n-space>
     </n-card>

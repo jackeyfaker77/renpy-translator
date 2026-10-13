@@ -7,6 +7,7 @@
 拒答只丢极少数场景，不再整图构建中断。
 """
 
+import prompt_store
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,24 +17,8 @@ BATCH = 25
 CONCURRENCY = 3
 MAX_RETRIES = 2
 
-_PROMPT = """你是视觉小说剧情分析专家。以下是从 Ren'Py 游戏静态解析出的剧情场景（JSON 数组），每项含：
-- id: 场景标识（label 名）
-- labels: 场景包含的连续 label 链
-- first: 场景首条台词原文
-- speakers: 出场角色
-- lines: 台词数
-- file: 所在脚本文件
+# 提示词模板在 prompt_store（scene.summary，可自定义）
 
-请为每个场景生成：
-- title: 中文标题（≤10 字，概括这段剧情，如"入学初遇""深夜密谈"；不要直译 label 名）
-- summary: 中文剧情梗概（50-100 字），覆盖：谁出场、在哪里/什么情境、
-  发生了什么、这段剧情对主线的意义；基于台词与上下文合理归纳，
-  信息不足时可推测但不要编造具体人名
-
-只输出 JSON 数组，不要输出任何其他文字：[{{"id": "...", "title": "...", "summary": "..."}}, ...]
-
-场景清单：
-{scenes_json}"""
 
 
 def summarize_scenes(scenes: list, translator,
@@ -60,8 +45,8 @@ def summarize_scenes(scenes: list, translator,
         })
 
     def _call(batch):
-        prompt = _PROMPT.format(
-            scenes_json=json.dumps(batch, ensure_ascii=False))
+        prompt = prompt_store.render(
+            'scene.summary', scenes_json=json.dumps(batch, ensure_ascii=False))
         result = translator.analyze_text(
             prompt, max_tokens=max(translator.config.max_tokens, 8000))
         m = re.search(r'\[.*\]', result, re.S)

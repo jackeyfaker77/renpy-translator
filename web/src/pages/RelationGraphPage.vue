@@ -20,6 +20,7 @@ import {
   CATEGORY_META, FACTION_PALETTE, GT,
 } from '../components/graph-theme'
 import { MiniMap, makeChart } from '../components/echarts-utils'
+import PageHelp from '../components/PageHelp.vue'
 import { useJobsStore } from '../stores/jobs'
 
 interface Character {
@@ -1025,6 +1026,7 @@ async function saveAdd() {
             </template>
             AI 重算会替换自动生成的关系（人工添加的保留），继续？
           </n-popconfirm>
+          <page-help :section="'9'" />
         </n-space>
       </n-space>
       <n-space v-if="factions.length" :size="6" style="margin-top: 8px">

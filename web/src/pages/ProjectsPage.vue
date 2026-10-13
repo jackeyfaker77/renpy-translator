@@ -14,6 +14,7 @@ import { renderIcon } from '../components/icons'
 import { nativeReady, pickDirectory } from '../api/native'
 import FileDropSelect from '../components/FileDropSelect.vue'
 import ProgressLine from '../components/ProgressLine.vue'
+import PageHelp from '../components/PageHelp.vue'
 import UpdateReportDialog from '../components/UpdateReportDialog.vue'
 
 
@@ -311,8 +312,9 @@ onMounted(async () => {
 
 <template>
   <div>
-    <n-space align="center" style="margin-bottom: 12px">
+    <n-space align="center" style="width: 100%; margin-bottom: 12px">
       <h2 style="margin: 0">项目管理</h2>
+      <page-help style="margin-left: auto" :section="'2,11'" />
       <n-button size="small" type="primary" :render-icon="renderIcon(AddOutline)" @click="openCreate">新建项目</n-button>
       <n-button size="small" :render-icon="renderIcon(DownloadOutline)" @click="importVisible = true">导入项目</n-button>
       <n-button size="small" quaternary :render-icon="renderIcon(RefreshOutline)" @click="store.refresh()">刷新</n-button>

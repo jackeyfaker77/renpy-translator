@@ -16,6 +16,7 @@
 
 每轮至少修复一处才继续，最多 MAX_ROUNDS 轮。
 """
+import prompt_store
 import asyncio
 import json
 import re
@@ -33,20 +34,8 @@ _OLD_RE = re.compile(r'^\s*old\s+"(.*)"\s*$')
 _COMMENT_STR_RE = re.compile(r'^\s*#\s+(?:\w+\s+)?"(.*)"\s*$')
 _PATH_COMMENT_RE = re.compile(r'^\s*#\s*(game/|[\w./-]+\.rpym?:\d+)')
 
-_FIX_PROMPT = """你是 Ren'Py 本地化专家。导出的翻译文件编译报错，需要修复译文。
+# 提示词模板在 prompt_store（export.fix，可自定义）
 
-错误: {err_file} 第 {err_line} 行: {err_msg}
-出错条目原文: {original}
-当前译文: {current}
-出错位置周边代码（带行号）:
-{context}
-
-判断原因并输出 JSON（不要输出任何其他文字）：
-- 译文本身可修正 → {{"action": "fix", "text": "修正后的译文"}}
-- 无法安全修正 → {{"action": "blank"}}（该条将回退显示原文，不影响游戏运行）
-
-要求：修正译文必须忠实原文；不得含未闭合的 [ ]、{{ }} 等插值/格式标记；
-换行、引号、% 由程序自动转义，无需处理。"""
 
 
 class ExportHealer:
@@ -328,8 +317,8 @@ class ExportHealer:
             context = '\n'.join(f'{i + 1:>5}│{lines[i]}' for i in range(s, e))
         except OSError:
             pass
-        prompt = _FIX_PROMPT.format(
-            err_file=error['file'], err_line=error['line'],
+        prompt = prompt_store.render(
+            'export.fix', err_file=error['file'], err_line=error['line'],
             err_msg=error['msg'], original=original,
             current=current, context=context)
         try:

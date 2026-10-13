@@ -11,6 +11,7 @@ import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
 import ImportTextsDialog from '../components/ImportTextsDialog.vue'
+import PageHelp from '../components/PageHelp.vue'
 import { useInlineEdit } from '../composables/useInlineEdit'
 import { useJobTask } from '../composables/useJobTask'
 import { useSessionStore } from '../stores/session'
@@ -103,18 +104,29 @@ async function onCommit(row: NameRow) {
   }
 }
 
-async function runOne(row: NameRow, mode: 'name' | 'analyze') {
+type RunMode = 'both' | 'name' | 'analyze'
+
+async function runOne(row: NameRow, mode: RunMode) {
   processing.value.add(rowKey(row))
   try {
     const data = await api.post<{ cn_name: string; profile: object }>(
       `/api/current/names/${encodeURIComponent(row.original || row.variable)}/translate`,
       { variable: row.variable, mode })
-    if (mode === 'name') {
+    if (mode !== 'analyze') {
       row.translated = data.cn_name || row.translated
       row.name_done = !!row.translated.trim()
-      toastOk(message, `${row.original} → ${data.cn_name}`)
-    } else {
+    }
+    if (mode !== 'name') {
       row.analyzed = !!data.profile
+    }
+    if (mode === 'name') {
+      toastOk(message, `${row.original} → ${data.cn_name}`)
+    } else if (mode === 'analyze') {
+      toastOk(message, `${row.original || row.variable} 分析完成`)
+    } else if (data.cn_name) {
+      toastOk(message, `${row.original} → ${data.cn_name}（已分析）`)
+    } else {
+      // 占位符/无显示名角色不译名，仅出画像
       toastOk(message, `${row.original || row.variable} 分析完成`)
     }
     await session.refresh()
@@ -140,7 +152,7 @@ async function keepOriginal(row: NameRow) {
   }
 }
 
-async function translateAll(mode: 'name' | 'analyze') {
+async function translateAll(mode: RunMode) {
   await runJob(
     () => api.post('/api/current/names/translate-all', { mode }),
     () => load())
@@ -248,19 +260,28 @@ const columns: DataTableColumns<NameRow> = [
     }, () => processing.value.has(rowKey(r)) ? '处理中' : r.analyzed ? '已完成' : '未分析'),
   },
   {
-    title: '操作', key: 'actions', width: 300,
+    title: '操作', key: 'actions', width: 360,
     render: (r) => h(NSpace, { size: 4 }, () => [
+      // 主操作：译名+画像一次出（名字带台词上下文，质量高于单独盲译）
       h(NButton, {
         size: 'tiny', type: 'primary', quaternary: true,
-        disabled: !r.original,
+        disabled: !r.original && !r.variable,
         loading: processing.value.has(rowKey(r)),
-        onClick: () => runOne(r, 'name'),
-      }, () => '翻译'),
+        onClick: () => runOne(r, 'both'),
+      }, () => '翻译+分析'),
+      // 仅分析：保留原名玩家/人工定名后补画像（不动人名）
       h(NButton, {
         size: 'tiny', quaternary: true,
         loading: processing.value.has(rowKey(r)),
         onClick: () => runOne(r, 'analyze'),
-      }, () => '分析'),
+      }, () => '仅分析'),
+      // 重译名：画像已好只换名字（不重跑分析）
+      h(NButton, {
+        size: 'tiny', quaternary: true,
+        disabled: !r.original,
+        loading: processing.value.has(rowKey(r)),
+        onClick: () => runOne(r, 'name'),
+      }, () => '重译名'),
       // 保留原名：不想翻译人名时使用，正文提及也保留原名
       h(NButton, {
         size: 'tiny', quaternary: true,
@@ -280,9 +301,12 @@ onMounted(load)
 
 <template>
   <div>
-    <n-space align="center" style="margin-bottom: 12px">
+    <n-space align="center" style="width: 100%; margin-bottom: 12px">
       <h2 style="margin: 0">人名翻译</h2>
-      <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)" @click="translateAll('name')">全部翻译</n-button>
+      <page-help style="margin-left: auto" :section="'3,7'" />
+      <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)" @click="translateAll('both')">
+        全部翻译+分析
+      </n-button>
       <n-button size="small" @click="translateAll('analyze')">全部分析</n-button>
       <n-popconfirm @positive-click="keepOriginalAll">
         <template #trigger>

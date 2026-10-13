@@ -316,6 +316,8 @@ class NameTranslationService:
         """批量处理角色。mode: 'both' 翻译+分析 / 'name' 仅翻译 /
         'analyze' 仅分析。
 
+        'both' 逐行按缺口补：缺人名的翻译+分析，已有人名只缺画像的
+        仅分析（不覆盖人工译名/保留原名标记）。
         Returns: {'completed': int, 'total': int, 'stopped': bool, 'nothing': bool}
         """
         self._cancel = False
@@ -323,46 +325,40 @@ class NameTranslationService:
         completed_count = 0
         action = {'both': '翻译+分析', 'name': '翻译', 'analyze': '分析'}[mode]
 
-        if mode == 'analyze':
-            all_chars = await loop.run_in_executor(None, self.db.get_characters)
-            # 按行 profile_json 精确判断（无显示名角色共享空显示名，
-            # name-key 字典会互相误覆盖导致后者永远轮不到分析）
-            todo = [(c['display_name'], c['variable'] or None) for c in all_chars
-                    if not c['profile_json'] and not c['is_placeholder']]
-            if not todo:
-                return {'completed': 0, 'total': 0, 'stopped': False, 'nothing': True}
-            total = len(todo)
-            self.logger.info(f'开始分析 {total} 个角色', panel='names')
-        else:
+        if mode == 'name':
             chars_todo = await loop.run_in_executor(
                 None, self.db.get_untranslated_characters)
-            total = len(chars_todo)
+            todo = [(c['display_name'], c['variable'] or None, 'name')
+                    for c in chars_todo]
+        else:
+            all_chars = await loop.run_in_executor(None, self.db.get_characters)
+            todo = []
+            for c in all_chars:
+                if c['is_placeholder']:
+                    continue
+                display = (c.get('display_name') or '').strip()
+                named = bool((c.get('cn_name') or '').strip())
+                if mode == 'both' and display and not named:
+                    # 缺人名：翻译+分析（画像也一并出）
+                    todo.append((c['display_name'], c['variable'] or None,
+                                 'both'))
+                elif not c.get('profile_json'):
+                    # 只缺画像（含无显示名角色）：仅分析，不动人名
+                    todo.append((display, c['variable'] or None, 'analyze'))
 
-            if total == 0:
-                if mode == 'name':
-                    return {'completed': 0, 'total': 0, 'stopped': False,
-                            'nothing': True}
-                all_chars = await loop.run_in_executor(None, self.db.get_characters)
-                # 按行 profile_json 精确判断（无显示名角色共享空显示名，
-                # name-key 字典会互相误覆盖导致后者永远轮不到分析）
-                unanalyzed = [(c['display_name'], c['variable'] or None) for c in all_chars
-                              if not c['profile_json'] and not c['is_placeholder']]
-                if not unanalyzed:
-                    return {'completed': 0, 'total': 0, 'stopped': False, 'nothing': True}
-                total = len(unanalyzed)
-                self.logger.info(f'人名已全部翻译，补充分析 {total} 个角色', panel='names')
-                todo = unanalyzed
-            else:
-                self.logger.info(f'开始{action} {total} 个角色', panel='names')
-                todo = [(c['display_name'], c['variable'] or None) for c in chars_todo]
+        total = len(todo)
+        if total == 0:
+            return {'completed': 0, 'total': 0, 'stopped': False, 'nothing': True}
+        self.logger.info(f'开始{action} {total} 个角色', panel='names')
 
-        for i, (name, var) in enumerate(todo):
+        for i, (name, var, row_mode) in enumerate(todo):
             if self._cancel:
                 break
             if self.on_progress:
                 self.on_progress(i, total, f'{action}: {i+1}/{total} {name}')
             try:
-                await self.translate_and_analyze(name, variable=var, mode=mode)
+                await self.translate_and_analyze(name, variable=var,
+                                                 mode=row_mode)
                 completed_count += 1
             except FatalAPIError as e:
                 self.logger.error(f'API 致命错误，批量任务中止: {e}', panel='names')

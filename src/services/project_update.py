@@ -20,7 +20,9 @@
     result = await updater.update(
         name, new_game_dir,
         progress=lambda pct, text: ...,
-        confirm_official_chinese=async def (file_count) -> bool,
+        confirm_official_chinese=async def (file_count) -> str,
+            返回 'delete'（删除官中重译）/ 'keep'（保留官中续译）/
+            'cancel'（取消更新）；旧布尔契约 True/False 等价 delete/cancel,
     )
 返回 {'success': True, 'carried': n, 'edited': n, 'new': n,
       'still_untranslated': n, 'obsolete': n, 'review': n,
@@ -41,12 +43,13 @@ from pathlib import Path
 from logger import TranslationLogger
 from project_manager import ProjectManager
 from services.game_pipeline import (
-    copy_with_progress, locate_ui_hints, refresh_characters,
-    resolve_game_root, resolve_sdk_or_raise, unpack_and_decompile,
+    copy_with_progress, find_app_root, locate_ui_hints, refresh_characters,
+    resolve_game_root, resolve_sdk_or_raise, sync_app_shell,
+    unpack_and_decompile,
 )
 from services.project_creation import (
     cleanup_conflicts, detect_official_chinese, generate_tl_templates,
-    parse_tl_dir, remove_official_chinese,
+    normalize_official_chinese, parse_tl_dir, remove_official_chinese,
 )
 
 _FUZZY_AUTO = 0.95    # ≥ 自动继承（留痕）
@@ -174,9 +177,12 @@ def merge_translations(old_dialogues: list[dict], old_ui: list[dict],
             original = item.get('original_text', '')
             old = pool.take(character, original)
             if old is not None:
-                # 精确命中：继承译文（旧行未翻译则仍为待译，不算新增）
-                item['translated_text'] = old.get('translated_text', '')
-                item['is_translated'] = bool(old.get('is_translated'))
+                # 精确命中：优先旧译（用户译文 > 新包官中）；旧行未译而
+                # 新条目自带官中译文时继承官中（不算新增待译）
+                trans = (old.get('translated_text', '')
+                         or item.get('translated_text', ''))
+                item['translated_text'] = trans
+                item['is_translated'] = bool(trans)
                 if item['is_translated']:
                     stats['carried'] += 1
                 else:
@@ -224,7 +230,12 @@ def merge_translations(old_dialogues: list[dict], old_ui: list[dict],
                     'ratio': ratio, 'status': 'pending',
                 })
             else:
-                stats['new'] += 1
+                # 无旧匹配：新条目自带官中译文（保留官中更新）计已继承，
+                # 否则才是新增待译
+                if item.get('translated_text'):
+                    stats['carried'] += 1
+                else:
+                    stats['new'] += 1
             out.append(item)
         return out
 
@@ -267,14 +278,20 @@ class ProjectUpdater:
                      cancel_event=None) -> dict:
         """执行更新。progress(pct, text) 同步回调。
 
+        confirm_official_chinese 为 async (file_count) -> str：
+        'delete' 删除官中重译、'keep' 保留官中续译、'cancel' 取消更新
+        （旧布尔 True/False 等价 delete/cancel）。
         任何异常（含取消）都会回滚到更新前状态后重抛。
-        用户拒绝官中处理时回滚并返回 {'cancelled': True}。
+        用户取消官中处理时回滚并返回 {'cancelled': True}。
         cancel_event: 可选 threading.Event，传给 SDK 子进程以便中止。
         """
         loop = asyncio.get_event_loop()
         _rie = partial(loop.run_in_executor, None)
-        # 与建项一致：mac .app 发行包先定位到含 game/ 的工程根再复制
-        new_game_dir = str(resolve_game_root(new_game_dir))
+        # 与建项一致：mac .app 发行包先定位到含 game/ 的工程根再复制，
+        # 并记录 .app 壳位置（成功收尾时刷新 app-shell 快照）
+        resolved_root = resolve_game_root(new_game_dir)
+        app_root = find_app_root(resolved_root)
+        new_game_dir = str(resolved_root)
 
         project_dir = self.project_manager.project_dir(name)
         game_work_dir = project_dir / 'game'
@@ -373,23 +390,38 @@ class ProjectUpdater:
             rel_files = await unpack_and_decompile(
                 _rie, game_work_dir, db, self.logger, progress)
 
-            # 步骤5: 新版本官中重检
+            # 步骤5: 新版本官中重检（删除重译 / 保留续译 / 取消）
             official_tl = await _rie(detect_official_chinese, game_work_dir)
             if official_tl:
                 progress(0.50, '检测到新版本自带中文翻译...')
                 if confirm_official_chinese is None:
                     raise RuntimeError('检测到官方中文翻译但未提供确认回调')
-                use_sdk = await confirm_official_chinese(official_tl)
-                if not use_sdk:
+                action = await confirm_official_chinese(official_tl)
+                # 兼容旧布尔契约：True=删除继续，False=取消
+                if action is True:
+                    action = 'delete'
+                elif action is False:
+                    action = 'cancel'
+                if action == 'cancel':
                     progress(0.50, '已取消更新')
                     await _rie(_restore)
                     self.logger.info(
                         '用户取消更新：新版本自带中文翻译', panel='projects')
                     return {'cancelled': True}
-                await _rie(remove_official_chinese, game_work_dir, self.logger)
-                self.logger.info(
-                    f'已删除新版本自带中文翻译（{official_tl} 个文件）',
-                    panel='projects')
+                if action == 'delete':
+                    await _rie(remove_official_chinese, game_work_dir,
+                               self.logger)
+                    self.logger.info(
+                        f'已删除新版本自带中文翻译（{official_tl} 个文件）',
+                        panel='projects')
+                else:
+                    # 保留官中：归一语言目录，官方译文经解析/merge 入库
+                    renamed = await _rie(normalize_official_chinese,
+                                          game_work_dir, self.logger)
+                    msg = f'保留新版本官方中文翻译（{official_tl} 个文件）'
+                    if renamed:
+                        msg += f'，tl/{renamed} 归并为 tl/chinese'
+                    self.logger.info(msg, panel='projects')
 
             # 步骤6: （原"内嵌 _() 重标记"已删除——源码只读原则：标记不再
             # 改工作副本，wrap 包裹在导出时于导出副本应用，行号漂移由导出
@@ -459,6 +491,8 @@ class ProjectUpdater:
             # 步骤12: 收尾
             progress(0.95, '正在清理...')
             await _rie(cleanup_conflicts, game_work_dir, self.logger)
+            # 壳快照随新版本刷新（新包非 mac 来源则清除旧壳）
+            await _rie(sync_app_shell, project_dir, app_root, self.logger)
 
             report = {
                 'success': True,

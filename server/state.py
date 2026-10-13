@@ -93,6 +93,7 @@ class AppState:
         self.bus = EventBus()
         self.jobs = JobRegistry(self.app_db, self.bus)
         self.config_manager = ConfigManager()
+        self._load_global_prompts()
         self.project_manager = ProjectManager()
         self.sdk_manager = SDKManager()
         self.logger = TranslationLogger()
@@ -213,6 +214,41 @@ class AppState:
             await loop.run_in_executor(None, db.close)
         await loop.run_in_executor(None, self.app_db.close)
 
+    @staticmethod
+    def _prompts_config_path() -> Path:
+        from rt_home import home
+        return home() / 'config' / 'prompts.json'
+
+    def _load_global_prompts(self):
+        """启动/保存后载入全局提示词覆盖（home()/config/prompts.json）"""
+        import prompt_store
+        prompt_store.load_global(self._prompts_config_path())
+
+    def save_global_prompts(self, overrides: dict):
+        """写全局提示词覆盖并热生效（阻塞，调用方 run_sync）"""
+        import prompt_store
+        prompt_store.set_global_overrides(overrides)
+        prompt_store.save_global(self._prompts_config_path())
+
+    def _set_project_prompts(self, db):
+        """项目覆盖随会话切换（阻塞，调用方 run_sync）：project_meta JSON"""
+        import json
+        import prompt_store
+        raw = db.get_meta('prompt_overrides') if db is not None else ''
+        try:
+            overrides = json.loads(raw) if raw else {}
+        except ValueError:
+            overrides = {}
+        prompt_store.set_project_overrides(overrides or {})
+
+    def save_project_prompts(self, overrides: dict):
+        """写项目提示词覆盖并热生效（阻塞，调用方 run_sync）"""
+        import json
+        import prompt_store
+        self.db.set_meta('prompt_overrides',
+                         json.dumps(overrides, ensure_ascii=False))
+        prompt_store.set_project_overrides(overrides)
+
     def _close_session_services(self):
         """关闭项目会话内持有线程池的服务（翻译服务 + 人名服务缓存）"""
         if self.name_service is not None:
@@ -322,6 +358,7 @@ class AppState:
         self.translator = translator
         self.translation_service = service
         self.current_project = name
+        await loop.run_in_executor(None, self._set_project_prompts, db)
         await loop.run_in_executor(
             None, self.app_db.set_setting, 'current_project', name)
         self.logger.info(f'已打开项目: {name}')
@@ -404,6 +441,8 @@ class AppState:
             await loop.run_in_executor(None, db.close)
         self.translator = None
         self.current_project = ''
+        import prompt_store
+        prompt_store.clear_project_overrides()
         await loop.run_in_executor(
             None, self.app_db.set_setting, 'current_project', '')
 
@@ -506,6 +545,7 @@ class AppState:
         # JobRegistry 内部缓存了 app_db 引用，重建后需同步刷新
         self.jobs.app_db = self.app_db
         self.config_manager = ConfigManager()
+        self._load_global_prompts()
         self.project_manager = ProjectManager()
         # 临时目录随数据根迁移
         self.temp_dir = new_home / 'temp'
