@@ -63,7 +63,7 @@ async def scan(state: AppState = Depends(require_project)):
                 rows,
                 on_progress=lambda phase, done, total: job.emit_progress(
                     done / max(total, 1) * 0.9,
-                    f'AI 预筛（{phase}）: {done}/{total}'),
+                    f'正在 AI 预筛（{phase}）... ({done}/{total})'),
                 cancel_event=job.cancel_event)
 
             answer = await job.ask('embedded_review', {
@@ -84,7 +84,7 @@ async def scan(state: AppState = Depends(require_project)):
                     target,
                     on_progress=lambda phase, done, total: job.emit_progress(
                         done / max(total, 1) * 0.9,
-                        f'灰区复核（{phase}）: {done}/{total}'),
+                        f'正在灰区复核（{phase}）... ({done}/{total})'),
                     cancel_event=job.cancel_event)
                 continue
             if action == 'refine_all':
@@ -94,7 +94,7 @@ async def scan(state: AppState = Depends(require_project)):
                     target,
                     on_progress=lambda phase, done, total: job.emit_progress(
                         done / max(total, 1) * 0.9,
-                        f'AI 精判（{phase}）: {done}/{total}'),
+                        f'正在 AI 精判（{phase}）... ({done}/{total})'),
                     cancel_event=job.cancel_event)
                 continue
             if action == 'cancel':

@@ -211,12 +211,22 @@ async def import_project(file: UploadFile = File(...), name: str = Form(''),
     await _save_upload(file, zip_path)
 
     async def body(job):
-        job.emit_progress(0.2, '正在解压项目包...')
+        job.emit_progress(0.05, '正在解压项目包...')
 
         def _do_import():
             with tempfile.TemporaryDirectory() as temp_dir:
                 with zipfile.ZipFile(zip_path, 'r') as zf:
-                    zf.extractall(temp_dir)
+                    # 逐项解压计数（与游戏 zip 解压同策略，大包不再无进度干等）
+                    infos = zf.infolist()
+                    total = len(infos) or 1
+                    for i, info in enumerate(infos, 1):
+                        job.check_cancelled()
+                        zf.extract(info, temp_dir)
+                        if i % 10 == 0 or i == total:
+                            job.emit_progress(
+                                0.05 + (i / total) * 0.65,
+                                f'正在解压项目包... ({i}/{total})')
+                job.emit_progress(0.7, '正在导入项目...')
                 return state.project_manager.import_from_zip(
                     temp_dir, name or None)
 

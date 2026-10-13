@@ -87,7 +87,7 @@ def make_download_body(state, version: str):
                             job.emit_progress(
                                 downloaded / total * 0.7,
                                 f'正在下载 SDK... '
-                                f'{downloaded >> 20}/{total >> 20} MB')
+                                f'({downloaded >> 20}/{total >> 20} MB)')
 
             await state.run_sync(_download)
         except BaseException:

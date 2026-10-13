@@ -27,9 +27,27 @@ _WEB_DIST = _BUNDLE / 'web' / 'dist'
 _req_logger = logging.getLogger('renpy_translator.requests')
 
 
+def _quiet_disconnect_errors(loop, context):
+    """过滤客户端断开连接的收尾噪声（Windows Proactor 已知问题）。
+
+    SSE/HTTP 长连接被浏览器或 WebView 强断（页面刷新/关闭发 RST）时，
+    Proactor 的 _call_connection_lost 在 sock.shutdown() 上抛
+    ConnectionResetError [WinError 10054]，asyncio 默认 exception handler
+    会把它整栈打成 "Exception in callback"——传输本已死亡，纯日志噪声。
+    这类断开异常静默，其余异常走默认处理。
+    """
+    exc = context.get('exception')
+    if isinstance(exc, (ConnectionResetError, ConnectionAbortedError,
+                        BrokenPipeError)):
+        return
+    loop.default_exception_handler(context)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from .state import AppState
+    # 挂到 uvicorn 主循环：客户端断开的收尾异常不再刷屏控制台
+    asyncio.get_running_loop().set_exception_handler(_quiet_disconnect_errors)
     app.state.app_state = AppState(app.state.root)
     await app.state.app_state.startup()
     yield

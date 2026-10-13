@@ -44,6 +44,14 @@ class Job:
         self._emit('log', {'text': text})
 
     def emit_progress(self, value: float, text: str = ''):
+        """回报进度：value 为 0-1（前端 ProgressLine 统一消费）。
+
+        文本格式约定（全项目统一）：
+        - 进行中：「正在{动作}...」，可量化时追加计数
+          「 ({done}/{total})」「 ({x}/{y} MB)」「 ({i}/{n} 批)」；
+        - 累计型（翻译批处理等）：「已处理 {done}/{total}…」；
+        - 终态：完成/结果句自由格式（「完成」「✅ 创建成功！…」）。
+        """
         # 节流：距上次 <0.3s 时，只有换新文本或进度跨过 0.5% 才发射
         # （逐文件复制/解压每文件一次回调，不节流会刷爆事件表）
         now = time.monotonic()

@@ -241,7 +241,7 @@ async def build_relations(req: RelationsBuildIn = None,
         job.check_cancelled()
         if engine_render:
             # 引擎立绘（实验）：关系图开关开启时同步重渲头像
-            job.emit_progress(0.9, '引擎渲染立绘')
+            job.emit_progress(0.9, '正在渲染引擎立绘...')
             await state.run_sync(_engine_avatars, state, job)
         job.emit_progress(1.0, '完成')
         return result

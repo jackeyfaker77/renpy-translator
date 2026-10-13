@@ -355,7 +355,7 @@ class NameTranslationService:
             if self._cancel:
                 break
             if self.on_progress:
-                self.on_progress(i, total, f'{action}: {i+1}/{total} {name}')
+                self.on_progress(i, total, f'正在{action}... ({i+1}/{total}) {name}')
             try:
                 await self.translate_and_analyze(name, variable=var,
                                                  mode=row_mode)

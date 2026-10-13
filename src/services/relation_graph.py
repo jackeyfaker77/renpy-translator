@@ -130,11 +130,11 @@ def build_relations(db, translator, game_name: str,
         raise ValueError('未配置模型，无法生成人物关系')
 
     if progress:
-        progress(0.05, '统计角色共现')
+        progress(0.05, '正在统计角色共现...')
     cooccur = _cooccurrence(db)
 
     if progress:
-        progress(0.15, 'AI 推断关系')
+        progress(0.15, '正在 AI 推断关系...')
     # 供 AI 的精简角色卡
     cards = []
     for c in characters:
@@ -155,7 +155,7 @@ def build_relations(db, translator, game_name: str,
         raise InterruptedError('关系图谱构建已取消')
 
     if progress:
-        progress(0.8, '合并写库')
+        progress(0.8, '正在写入数据库...')
     # 显示名 → 身份键（同名角色并存时取第一个，AI 输出粒度无法区分同名）
     name_to_key = {}
     for c in characters:

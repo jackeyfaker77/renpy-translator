@@ -1,9 +1,10 @@
 <!-- 统一进度条组件。
-     规范：
+     规范（与后端 emit_progress 约定对齐）：
      - 任务级进度一律传 0-1（后端 emit_progress 约定）；
      - 统计级 0-100 的值传入前由调用方除以 100；
-     - 高度统一 8px，不允许各页面自定义 height；
-     - status 保持受控：不传即 'default'，不做 value>=1 自动 success。 -->
+     - 高度统一 8px，不允许各页面自定义 height，不允许页面直接用 n-progress；
+     - status 保持受控：不传即 'default'，不做 value>=1 自动 success。
+     阶段文本由后端 progress text 提供，格式「正在{动作}... ({done}/{total})」。 -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NProgress } from 'naive-ui'

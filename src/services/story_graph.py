@@ -54,12 +54,12 @@ def build_story_graph(db, game_root: str, cache_dir: str,
     source_root = resolve_source_root(Path(game_root))
 
     if progress:
-        progress(0.02, '解析控制流')
+        progress(0.02, '正在解析控制流...')
     result = FlowParser(str(source_root)).parse()
     nodes, edges = result['nodes'], result['edges']
 
     if progress:
-        progress(0.10, '构建图像索引')
+        progress(0.10, '正在构建图像索引...')
     resolver = ImageResolver(str(source_root))
 
     # 逐节点合成缩略图候选（10% ~ 60% 进度段）：多帧出图供手动更换。
@@ -143,7 +143,7 @@ def build_story_graph(db, game_root: str, cache_dir: str,
                     n.thumb_files = names
         if i % 20 == 0 and progress:
             progress(0.10 + 0.50 * i / total,
-                     f'合成场景缩略图 {i}/{total}（复用 {reused}）')
+                     f'正在合成场景缩略图... ({i}/{total}，复用 {reused})')
 
     # ---- 引擎渲染（实验）：Ren'Py 沙盒整批渲染；启动失败直接报错
     #（不回退 Pillow——用户选了引擎渲染就要看到引擎的结果或明确的失败）
@@ -163,8 +163,8 @@ def build_story_graph(db, game_root: str, cache_dir: str,
                 raise InterruptedError('剧情图构建已取消')
             if progress:
                 progress(0.30 + 0.28 * (ci - 1) / len(chunks),
-                         f'引擎渲染沙盒 第 {ci}/{len(chunks)} 批'
-                         f'（{len(chunk)} 个 label）')
+                         f'正在引擎渲染沙盒... ({ci}/{len(chunks)} 批，'
+                         f'{len(chunk)} 个 label)')
             jobs = build_jobs([(lb, ops, f, la, init)
                                for lb, ops, f, la, init, _ in chunk])
             if ci == 1:
@@ -199,7 +199,7 @@ def build_story_graph(db, game_root: str, cache_dir: str,
         pass
 
     if progress:
-        progress(0.62, '解析角色立绘')
+        progress(0.62, '正在解析角色立绘...')
     # 角色立绘：对 characters 表全量角色解析（speaker 必在其中，
     # 关系图谱也复用这份映射）；同时收集候选变体（手动换头像用）
     avatars = {}
@@ -227,7 +227,7 @@ def build_story_graph(db, game_root: str, cache_dir: str,
 
     # 译文回填到 flow 对象（label 级入库与场景聚合共用）
     if progress:
-        progress(0.66, '映射已翻译文本')
+        progress(0.66, '正在映射已翻译文本...')
     trans = _translation_map(db)
     for n in nodes:
         n.first_text_cn = trans.get(n.first_text, '')
@@ -237,7 +237,7 @@ def build_story_graph(db, game_root: str, cache_dir: str,
 
     # ---- label 级入库 ----
     if progress:
-        progress(0.70, '写入 label 级数据')
+        progress(0.70, '正在写入 label 级数据...')
     node_rows = [{
         'label': n.label, 'file': n.file,
         'line_start': n.line_start, 'line_end': n.line_end,
@@ -260,7 +260,7 @@ def build_story_graph(db, game_root: str, cache_dir: str,
 
     # ---- 场景聚合 ----
     if progress:
-        progress(0.76, '聚合剧情场景')
+        progress(0.76, '正在聚合剧情场景...')
     agg = build_scenes(nodes, edges)
     scenes, scene_edges = agg['scenes'], agg['edges']
 
@@ -297,7 +297,7 @@ def build_story_graph(db, game_root: str, cache_dir: str,
             progress=_ai_progress, cancel_event=cancel_event))
 
     if progress:
-        progress(0.95, '写入场景数据')
+        progress(0.95, '正在写入场景数据...')
     scene_rows = [{
         'scene_id': s.scene_id,
         'title': titles.get(s.scene_id, {}).get('title', ''),

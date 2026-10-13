@@ -7,7 +7,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NButton, NCard, NDrawer, NDrawerContent, NEmpty, NInput, NPagination,
-  NModal, NProgress, NSelect, NSpace, NSpin, NStatistic, NSwitch, NTag,
+  NModal, NSelect, NSpace, NSpin, NStatistic, NSwitch, NTag,
   NText, useMessage,
 } from 'naive-ui'
 import { PlayOutline, RefreshOutline } from '@vicons/ionicons5'
@@ -19,6 +19,7 @@ import { renderIcon } from '../components/icons'
 import { GT } from '../components/graph-theme'
 import { MiniMap, makeChart } from '../components/echarts-utils'
 import PageHelp from '../components/PageHelp.vue'
+import ProgressLine from '../components/ProgressLine.vue'
 import { useJobsStore } from '../stores/jobs'
 
 interface ApiScene {
@@ -1222,10 +1223,11 @@ function speakersOfFull(s: ApiScene) {
                 {{ selected.translated_count }}/{{ selected.tl_total }}
               </n-text>
             </n-space>
-            <n-progress type="line" :percentage="selectedProgress"
-                        :status="selectedProgress >= 100 ? 'success'
-                          : selectedProgress > 0 ? 'warning' : 'default'"
-                        :height="8" border-radius="4px" />
+            <progress-line
+              :value="selectedProgress / 100"
+              :status="selectedProgress >= 100 ? 'success'
+                : selectedProgress > 0 ? 'warning' : 'default'"
+            />
           </div>
           <n-text depth="2" style="font-size: 12px">
             {{ selected.file_path }}:{{ selected.line_start }} ·

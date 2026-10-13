@@ -94,7 +94,7 @@ def summarize_scenes(scenes: list, translator,
             done += 1
             if progress:
                 progress(done / len(batches),
-                         f'AI 场景标题 {done}/{len(batches)} 批')
+                         f'正在生成 AI 场景标题... ({done}/{len(batches)} 批)')
     hit, total = translator.cache_stats_delta(cache_before)
     if total:
         print(f'[场景摘要] prompt 缓存命中 {hit}/{total} tokens'
