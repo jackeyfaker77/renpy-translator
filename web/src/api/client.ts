@@ -66,11 +66,16 @@ export const api = {
     if (!resp.ok) await throwResponseError(resp)
     return resp.json() as Promise<T>
   },
-  /** 带上传进度的 multipart（fetch 不支持上传进度，用 XHR） */
+  /** 带上传进度的 multipart（fetch 不支持上传进度，用 XHR）。
+   *  返回 promise 与 abort：abort() 中断上传，promise 以
+   *  UPLOAD_CANCELLED 拒绝（调用方按非错误处理）。 */
   postFormProgress<T>(url: string, form: FormData,
-                      onProgress: (pct: number) => void): Promise<T> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
+                      onProgress: (pct: number) => void): {
+    promise: Promise<T>
+    abort: () => void
+  } {
+    const xhr = new XMLHttpRequest()
+    const promise = new Promise<T>((resolve, reject) => {
       xhr.open('POST', url)
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) onProgress(e.loaded / e.total)
@@ -84,10 +89,18 @@ export const api = {
           reject(toApiError(xhr.status, xhr.statusText, data))
         }
       }
+      xhr.onabort = () =>
+        reject(new ApiError(0, 'UPLOAD_CANCELLED', '上传已取消', ''))
       xhr.onerror = () => reject(new ApiError(0, 'NETWORK', '网络错误', ''))
       xhr.send(form)
     })
+    return { promise, abort: () => xhr.abort() }
   },
+}
+
+/** 上传被用户中断（UPLOAD_CANCELLED）——按非错误处理，不上抛错误提示 */
+export function isUploadCancelled(e: unknown): boolean {
+  return e instanceof ApiError && e.code === 'UPLOAD_CANCELLED'
 }
 
 /** 复制到剪贴板（clipboard API 不可用时回退 execCommand，兼容 pywebview 环境） */

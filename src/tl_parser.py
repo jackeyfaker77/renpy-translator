@@ -180,16 +180,19 @@ def _parse_strings_block(lines, tl_file, game_path, ui_texts):
             continue
         new_match = re.match(r'^\s+new\s+"(.*)"', line)
         if new_match and current_old is not None:
-            # new 行是译文：空串 = 未翻译（SDK 模板），非空 = 已有译文
-            # （官方中文保留）
+            # new 行是译文。SDK 模板有两种占位形态：空串，或把原文原样
+            # 回填进 new（translate 默认 null_filter 不带 --empty）——
+            # 与原文相同即未翻译（与对话块同一规则）；官方中文保留的
+            # 译文才会与原文不同
             new_text = new_match.group(1).replace('\\"', '"')
+            is_translated = bool(new_text) and new_text != current_old
             full_path = str(game_path / 'game' / current_file) if current_file else ''
             entry = {
                 'file_path': full_path, 'line_number': current_line or 0,
                 'label': '',
                 'character': '', 'original_text': current_old,
-                'translated_text': new_text if new_text else '',
-                'is_translated': bool(new_text),
+                'translated_text': new_text if is_translated else '',
+                'is_translated': is_translated,
             }
             ui_texts.append(entry)
             current_old = None

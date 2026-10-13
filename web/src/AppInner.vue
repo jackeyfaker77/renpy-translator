@@ -10,7 +10,9 @@ import type { MenuOption } from 'naive-ui'
 import { useSessionStore } from './stores/session'
 import { useProjectsStore } from './stores/projects'
 import { useJobsStore, type JobView } from './stores/jobs'
+import { useUploadsStore } from './stores/uploads'
 import JobProgressDialog from './components/JobProgressDialog.vue'
+import UploadProgressDialog from './components/UploadProgressDialog.vue'
 import EmbeddedReviewDialog from './components/EmbeddedReviewDialog.vue'
 import { api, toastError } from './api/client'
 import { openUrl } from './api/native'
@@ -19,6 +21,7 @@ const message = useMessage()
 const session = useSessionStore()
 const projectsStore = useProjectsStore()
 const jobsStore = useJobsStore()
+const uploadsStore = useUploadsStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -48,16 +51,28 @@ const dialogJobs = computed(() =>
 const backgroundJobs = computed(() =>
   jobsStore.activeJobs.filter((j) => !j.dialogOpen))
 
-const taskMenuOptions = computed(() =>
-  backgroundJobs.value.map((j) => ({
+/** 后台上传任务（zip 传输阶段）：与服务端任务同列展示 */
+const backgroundUploads = computed(() => uploadsStore.backgroundTasks)
+
+const taskMenuOptions = computed(() => [
+  ...backgroundUploads.value.map((t) => ({
+    key: 'up:' + t.id,
+    label: `${t.label} ${Math.round(t.pct * 100)}%`,
+  })),
+  ...backgroundJobs.value.map((j) => ({
     key: j.id,
     label: j.status === 'waiting_input'
       ? `${j.label || '任务'} — 等待确认`
       : `${j.label || '任务'} ${Math.round(j.progress * 100)}%`,
-  })))
+  })),
+])
 
-function openFromList(jobId: string) {
-  jobsStore.openDialog(jobId)
+function openFromList(key: string) {
+  if (key.startsWith('up:')) {
+    uploadsStore.openDialog(key.slice(3))
+    return
+  }
+  jobsStore.openDialog(key)
 }
 
 async function onProjectChange(name: string | null) {
@@ -261,13 +276,13 @@ onUnmounted(() => {
       <!-- 后台任务列表：进度对话框被关闭后任务仍在跑，点列表项重开对应对话框 -->
       <span style="flex: 1" />
       <n-dropdown
-        v-if="backgroundJobs.length"
+        v-if="backgroundJobs.length || backgroundUploads.length"
         trigger="click" placement="bottom-end"
         :options="taskMenuOptions"
         @select="openFromList"
       >
         <n-button size="tiny" quaternary type="info">
-          ⏳ 后台任务 {{ backgroundJobs.length }}
+          ⏳ 后台任务 {{ backgroundJobs.length + backgroundUploads.length }}
         </n-button>
       </n-dropdown>
     </n-layout-header>
@@ -333,6 +348,9 @@ onUnmounted(() => {
       </n-space>
     </template>
   </n-modal>
+
+  <!-- 全局上传进度对话框（zip 传输阶段；顶栏任务列表点开） -->
+  <upload-progress-dialog />
 
   <!-- 全局任务进度对话框（刷新/切路由后自动重开） -->
   <job-progress-dialog v-for="j in dialogJobs" :key="j.id" :job="j">

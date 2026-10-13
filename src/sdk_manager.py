@@ -1,5 +1,6 @@
 """Ren'Py SDK 管理器 - 负责调用 Ren'Py SDK 功能"""
 
+import ast
 import os
 import re
 import sys
@@ -10,31 +11,112 @@ from pathlib import Path
 
 from proc_registry import track, untrack
 
-# 7.x 及更早：__init__.py 里字面量 version_tuple = (7, 4, 9, vc_version)
-_VER_TUPLE_RE = re.compile(r'version_tuple\s*=\s*\((\d+),\s*(\d+),\s*(\d+)')
+# __init__.py 里 version_tuple = (7, 4, 9, vc_version) 字面量（可能多支）
+# 行首锚定：排除注释/字符串里的 version_tuple 示例误命中
+_VER_TUPLE_RE = re.compile(
+    r'^\s*version_tuple\s*=\s*\((\d+),\s*(\d+),\s*(\d+)', re.MULTILINE)
 # 8.x 的 __init__.py 版本是动态计算的，改从 SDK 目录名解析
 _DIR_NAME_RE = re.compile(r'renpy-(\d+)\.(\d+)\.(\d+)-sdk')
+# 发行包 .sh 启动器的运行时标记：PYTHON="py3"
+_PY_LAUNCHER_RE = re.compile(r'PYTHON="py(\d)"')
+# lib/ 下的 Python 运行时目录：py2-*/py3-*（8.x）、python2.x/python3.x、
+# 7.3.x 发行包的 pythonlib2.x
+_PY_LIB_DIR_RE = re.compile(r'^(?:py([23])-|python(?:lib)?([23]))')
+
+
+def _script_version(base: Path) -> tuple | None:
+    """游戏构建时写入的 game/script_version.txt → (major, minor, patch)。
+
+    distribute.rpy 打包时写 repr(renpy.version_tuple[:-1])，是「游戏用
+    哪个引擎构建」的最直接证据。读不出返回 None。
+    """
+    try:
+        text = (base / 'game' / 'script_version.txt').read_text(
+            encoding='utf-8', errors='ignore')
+        v = ast.literal_eval(text.strip())
+    except (OSError, ValueError, SyntaxError):
+        return None
+    if (isinstance(v, tuple) and len(v) >= 3
+            and all(isinstance(i, int) for i in v[:3])):
+        return tuple(v[:3])
+    return None
+
+
+def _runtime_python_major(base: Path) -> int | None:
+    """发行包/SDK 自带运行时的 Python 大版本，认不出返回 None。
+
+    lib/ 目录命名：8.x 是 py3-*/python3.x，7.x 是 py2-*/python2.7
+    （更老布局的裸平台目录 windows-x86_64 等必配 python2.7）；认不出
+    再看根目录 .sh 启动器的 PYTHON="pyN" 标记。
+    """
+    try:
+        names = [(p.name or '').lower() for p in (base / 'lib').iterdir()]
+    except OSError:
+        names = []
+    for n in names:
+        m = _PY_LIB_DIR_RE.match(n)
+        if m:
+            return int(m.group(1) or m.group(2))
+    try:
+        shs = list(base.glob('*.sh'))
+    except OSError:
+        shs = []
+    for sh in shs:
+        try:
+            m = _PY_LAUNCHER_RE.search(
+                sh.read_text(encoding='utf-8', errors='ignore'))
+        except OSError:
+            continue
+        if m:
+            return int(m.group(1))
+    return None
 
 
 def detect_engine_version(base) -> tuple | None:
     """探测 Ren'Py 引擎版本 (major, minor, patch)。
 
-    base: 游戏目录（读取其内置 renpy/__init__.py；7.x 可直接解析，
-    8.x 游戏读不到则返回 None）或 SDK 目录（从目录名解析）。
+    base: 游戏目录或 SDK 目录。判定顺序：
+    1. SDK 目录名 renpy-X.Y.Z-sdk——安装器命名契约，SDK 目录最可靠
+       （8.x 新版 __init__.py 版本动态计算没有字面量，更早的双分支
+       字面量对 SDK 目录反而有误判风险）
+    2. game/script_version.txt——游戏构建时 distribute.rpy 写入的
+       版本元组，比引擎源码更早可得（源码可被剥离）
+    3. renpy/__init__.py 的 version_tuple 字面量。7.5/8.0 共用源码是
+       if PY2:（7.x）/ else:（8.x）双分支两支字面量，按发行包自带
+       运行时取对应分支——误取 PY2 支会把 8.x 游戏判成 7.x，拿 7.x
+       SDK（Python 2.7）去 parse f-string/nearrect 等 8.x 语法直接
+       解析失败（Motherless-0.26.1 实测）
+    4. 仅 lib/ 运行时可判（源码与版本元组都被剥离）→ 按大版本合成
+       (7, 0, 0)/(8, 0, 0)，minor/patch 无意义、仅供 SDK 大版本路由
     """
     base = Path(base)
+    m = _DIR_NAME_RE.fullmatch(base.name)
+    if m:
+        return tuple(int(g) for g in m.groups())
+    sv = _script_version(base)
+    if sv:
+        return sv
     text = ''
     try:
         text = (base / 'renpy' / '__init__.py').read_text(
             encoding='utf-8', errors='ignore')
     except OSError:
         pass
-    m = _VER_TUPLE_RE.search(text)
-    if m:
-        return tuple(int(g) for g in m.groups())
-    m = _DIR_NAME_RE.search(base.name)
-    if m:
-        return tuple(int(g) for g in m.groups())
+    literals = [tuple(int(g) for g in m.groups())
+                for m in _VER_TUPLE_RE.finditer(text)]
+    if len(literals) == 1:
+        return literals[0]
+    if literals:
+        # 双分支共用源码：PY2 支在前（7.x）、else 支在后（8.x），
+        # 取哪支由发行包自带的 Python 运行时决定
+        py = _runtime_python_major(base)
+        return literals[-1] if py == 3 else literals[0]
+    # 版本信息全无（引擎源码被剥离的快照）：仅按运行时给大版本合成值，
+    # 让 SDK 选择走对大版本——比 None（调用方默认 8.x）稳：7.x 游戏
+    # 剥壳后误用 8.x SDK 会重蹈 Motherless 式解析失败
+    py = _runtime_python_major(base)
+    if py:
+        return (7 if py == 2 else 8, 0, 0)
     return None
 
 

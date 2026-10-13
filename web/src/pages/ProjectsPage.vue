@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   NButton, NCard, NEmpty, NInput, NInputGroup, NModal, NPopconfirm,
   NRadioButton, NRadioGroup, NSpace, NTag, NText,
@@ -8,8 +8,9 @@ import {
 import { useSessionStore } from '../stores/session'
 import { useProjectsStore, type ProjectItem } from '../stores/projects'
 import { useJobsStore } from '../stores/jobs'
+import { useUploadsStore } from '../stores/uploads'
 import { AddOutline, DownloadOutline, RefreshOutline } from '@vicons/ionicons5'
-import { api, toastError, toastOk } from '../api/client'
+import { api, isUploadCancelled, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import { nativeReady, pickDirectory } from '../api/native'
 import FileDropSelect from '../components/FileDropSelect.vue'
@@ -22,7 +23,13 @@ const message = useMessage()
 const session = useSessionStore()
 const store = useProjectsStore()
 const jobsStore = useJobsStore()
+const uploadsStore = useUploadsStore()
 const guiMode = ref(false)
+
+/** 各表单对话框当前对应的上传任务（内联进度 + 取消） */
+const createUpload = computed(() => uploadsStore.ofKind('create'))
+const importUpload = computed(() => uploadsStore.ofKind('import'))
+const updateUpload = computed(() => uploadsStore.ofKind('update'))
 
 async function browseDir() {
   const dir = await pickDirectory()
@@ -43,16 +50,12 @@ const createName = ref('')
 const createMethod = ref<'path' | 'zip'>('path')
 const createDir = ref('')
 const createZip = ref<File | null>(null)
-const creating = ref(false)
-const uploadPct = ref(0)   // zip 上传进度（-1 = 未开始）
 
 function openCreate() {
   createName.value = ''
   createDir.value = ''
   createZip.value = null
   createMethod.value = 'path'
-  creating.value = false
-  uploadPct.value = -1
   createVisible.value = true
 }
 
@@ -77,23 +80,21 @@ async function submitCreate() {
         message.warning('请先选择 zip 文件')
         return
       }
-      // 大 zip 上传是主要等待段：对话框内显示实时上传进度
-      creating.value = true
-      uploadPct.value = 0
+      // 大 zip 上传是主要等待段：任务化——对话框内联进度，关闭对话框
+      // 不中断（转顶栏后台任务列表），可随时取消
       const form = new FormData()
       form.append('name', createName.value)
       form.append('file', createZip.value)
-      const data = await api.postFormProgress<{ job_id: string }>(
-        '/api/projects/create-zip', form,
-        (pct) => { uploadPct.value = pct })
+      const data = await uploadsStore.upload<{ job_id: string }>(
+        'create', `上传 ${createZip.value.name}（新建项目）`,
+        '/api/projects/create-zip', form)
       jobId = data.job_id
     }
     createVisible.value = false
     jobsStore.track(jobId)
   } catch (e) {
+    if (isUploadCancelled(e)) return // 用户取消，无需报错
     toastError(message, e)
-  } finally {
-    creating.value = false
   }
 }
 
@@ -101,8 +102,6 @@ async function submitCreate() {
 const importVisible = ref(false)
 const importName = ref('')
 const importZip = ref<File | null>(null)
-const importing = ref(false)
-const importPct = ref(-1)
 
 // ---- 更新版本 ----
 const updateVisible = ref(false)
@@ -110,18 +109,19 @@ const updateName = ref('')
 const updateMethod = ref<'path' | 'zip'>('path')
 const updateDir = ref('')
 const updateZip = ref<File | null>(null)
-const updating = ref(false)
-const updatePct = ref(-1)
 const reportVisible = ref(false)
 const reportName = ref('')
+
+// 对话框开合 ⇄ 上传任务可见性：开着内联展示，关了转顶栏「后台任务」列表
+watch(createVisible, (v) => uploadsStore.setDialogOpen('create', v))
+watch(updateVisible, (v) => uploadsStore.setDialogOpen('update', v))
+watch(importVisible, (v) => uploadsStore.setDialogOpen('import', v))
 
 function openUpdate(p: ProjectItem) {
   updateName.value = p.name
   updateDir.value = ''
   updateZip.value = null
   updateMethod.value = 'path'
-  updating.value = false
-  updatePct.value = -1
   updateVisible.value = true
 }
 
@@ -152,21 +152,18 @@ async function submitUpdate() {
         message.warning('请先选择 zip 文件')
         return
       }
-      updating.value = true
-      updatePct.value = 0
       const form = new FormData()
       form.append('file', updateZip.value)
-      const data = await api.postFormProgress<{ job_id: string }>(
-        `/api/projects/${encName}/update-zip`, form,
-        (pct) => { updatePct.value = pct })
+      const data = await uploadsStore.upload<{ job_id: string }>(
+        'update', `上传 ${updateZip.value.name}（更新版本）`,
+        `/api/projects/${encName}/update-zip`, form)
       jobId = data.job_id
     }
     updateVisible.value = false
     jobsStore.track(jobId)
   } catch (e) {
+    if (isUploadCancelled(e)) return // 用户取消，无需报错
     toastError(message, e)
-  } finally {
-    updating.value = false
   }
 }
 
@@ -175,20 +172,18 @@ async function submitImport() {
     message.warning('请先选择 zip 文件')
     return
   }
-  importing.value = true
-  importPct.value = 0
   try {
     const form = new FormData()
     form.append('name', importName.value)
     form.append('file', importZip.value)
-    const data = await api.postFormProgress<{ job_id: string }>(
-      '/api/projects/import', form, (pct) => { importPct.value = pct })
+    const data = await uploadsStore.upload<{ job_id: string }>(
+      'import', `上传 ${importZip.value.name}（导入项目）`,
+      '/api/projects/import', form)
     importVisible.value = false
     jobsStore.track(data.job_id)
   } catch (e) {
+    if (isUploadCancelled(e)) return // 用户取消，无需报错
     toastError(message, e)
-  } finally {
-    importing.value = false
   }
 }
 
@@ -389,15 +384,24 @@ onMounted(async () => {
           v-else v-model="createZip" accept=".zip"
           placeholder="点击或拖拽选择游戏 zip"
         />
-        <div v-if="creating && uploadPct >= 0">
-          <n-text depth="3" style="font-size: 12px">正在上传 zip（本地传输，大文件需等待）...</n-text>
-          <progress-line :value="uploadPct" processing />
+        <div v-if="createUpload">
+          <n-space align="center" justify="space-between">
+            <n-text depth="3" style="font-size: 12px">
+              正在上传 zip（本地传输，大文件需等待）——关闭对话框不会中断
+            </n-text>
+            <n-button size="tiny" type="error" quaternary
+                      @click="uploadsStore.cancel(createUpload.id)">取消上传</n-button>
+          </n-space>
+          <progress-line :value="createUpload.pct" processing />
         </div>
       </n-space>
       <template #footer>
         <n-space justify="end">
-          <n-button :disabled="creating" @click="createVisible = false">取消</n-button>
-          <n-button type="primary" :loading="creating" @click="submitCreate">创建</n-button>
+          <n-button @click="createVisible = false">
+            {{ createUpload ? '关闭（后台继续）' : '取消' }}
+          </n-button>
+          <n-button type="primary" :loading="!!createUpload" :disabled="!!createUpload"
+                    @click="submitCreate">创建</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -424,15 +428,24 @@ onMounted(async () => {
           v-else v-model="updateZip" accept=".zip"
           placeholder="点击或拖拽选择新版本 zip"
         />
-        <div v-if="updating && updatePct >= 0">
-          <n-text depth="3" style="font-size: 12px">正在上传 zip（本地传输，大文件需等待）...</n-text>
-          <progress-line :value="updatePct" processing />
+        <div v-if="updateUpload">
+          <n-space align="center" justify="space-between">
+            <n-text depth="3" style="font-size: 12px">
+              正在上传 zip（本地传输，大文件需等待）——关闭对话框不会中断
+            </n-text>
+            <n-button size="tiny" type="error" quaternary
+                      @click="uploadsStore.cancel(updateUpload.id)">取消上传</n-button>
+          </n-space>
+          <progress-line :value="updateUpload.pct" processing />
         </div>
       </n-space>
       <template #footer>
         <n-space justify="end">
-          <n-button :disabled="updating" @click="updateVisible = false">取消</n-button>
-          <n-button type="primary" :loading="updating" @click="submitUpdate">开始更新</n-button>
+          <n-button @click="updateVisible = false">
+            {{ updateUpload ? '关闭（后台继续）' : '取消' }}
+          </n-button>
+          <n-button type="primary" :loading="!!updateUpload" :disabled="!!updateUpload"
+                    @click="submitUpdate">开始更新</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -447,15 +460,24 @@ onMounted(async () => {
           v-model="importZip" accept=".zip"
           placeholder="点击或拖拽选择项目包 zip"
         />
-        <div v-if="importing && importPct >= 0">
-          <n-text depth="3" style="font-size: 12px">正在上传项目包...</n-text>
-          <progress-line :value="importPct" processing />
+        <div v-if="importUpload">
+          <n-space align="center" justify="space-between">
+            <n-text depth="3" style="font-size: 12px">
+              正在上传项目包——关闭对话框不会中断
+            </n-text>
+            <n-button size="tiny" type="error" quaternary
+                      @click="uploadsStore.cancel(importUpload.id)">取消上传</n-button>
+          </n-space>
+          <progress-line :value="importUpload.pct" processing />
         </div>
       </n-space>
       <template #footer>
         <n-space justify="end">
-          <n-button :disabled="importing" @click="importVisible = false">取消</n-button>
-          <n-button type="primary" :loading="importing" @click="submitImport">导入</n-button>
+          <n-button @click="importVisible = false">
+            {{ importUpload ? '关闭（后台继续）' : '取消' }}
+          </n-button>
+          <n-button type="primary" :loading="!!importUpload" :disabled="!!importUpload"
+                    @click="submitImport">导入</n-button>
         </n-space>
       </template>
     </n-modal>

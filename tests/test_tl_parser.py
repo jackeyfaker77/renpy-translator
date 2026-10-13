@@ -252,3 +252,27 @@ def test_strings_empty_new_untranslated(tmp_path):
     u = next(u for u in result['ui_texts'] if u['original_text'] == 'Empty New')
     assert u['is_translated'] is False
     assert u['translated_text'] == ''
+
+
+def test_strings_new_same_as_old_untranslated(tmp_path):
+    """SDK 模板（null_filter）把原文原样回填进 new：译文==原文 = 未翻译。
+
+    Motherless 实测：translate 默认不带 --empty，生成的模板
+    `new "Click to play..."` 与 old 相同，旧逻辑按「new 非空 = 已译」
+    误判 1046 条 UI 字符串全部已翻译且译文==原文。"""
+    tl = tmp_path / 'game' / 'tl' / 'chinese'
+    tl.mkdir(parents=True)
+    content = (
+        'translate chinese strings:\n'
+        '\n'
+        '    # renpy/common/00accessibility.rpy:28\n'
+        '    old "Click to play the video."\n'
+        '    new "Click to play the video."\n'
+    )
+    (tl / 'common.rpy').write_text(content, encoding='utf-8')
+    from tl_parser import parse_translation_files
+    result = parse_translation_files(tmp_path / 'game' / 'tl' / 'chinese', tmp_path)
+    u = next(u for u in result['ui_texts']
+             if u['original_text'] == 'Click to play the video.')
+    assert u['is_translated'] is False
+    assert u['translated_text'] == ''
