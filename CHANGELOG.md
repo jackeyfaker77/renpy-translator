@@ -5,6 +5,24 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [v0.4.6] - 2026-10-13
+
+### 优化
+
+- 进度显示策略统一：进行中文本一律「正在{动作}... ({done}/{total})」
+  格式（20 处进度文案），规范写入 emit_progress 与 ProgressLine 约定；
+  import 项目包解压从无进度一步跳改为逐项计数（大包不再干等）；
+  剧情图场景进度条改走统一组件 ProgressLine（edc4f54）
+
+### 修复
+
+- 滚动条样式割裂：此前无全局滚动条样式，部分区域 n-scrollbar 暗色
+  浮条、部分区域 Windows 亮色系统滚动条；全局统一为暗色细圆角
+  （对齐 n-scrollbar 观感），覆盖全部原生滚动区域（edc4f54）
+- 控制台刷屏「Exception in callback …ConnectionResetError [WinError
+  10054]」：SSE/长连接被浏览器断开时 Windows Proactor 收尾异常被
+  asyncio 整栈打印（纯噪声无功能影响），现静默断开类异常（edc4f54）
+
 ## [v0.4.5] - 2026-10-13
 
 ### 新增
