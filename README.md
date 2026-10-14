@@ -19,6 +19,10 @@ AI 翻译 + 手动校对，支持解包/反编译、人名与角色分析、内�
 [![Naive UI](https://img.shields.io/badge/Naive_UI-63e2b7)](https://www.naiveui.com/)
 [![Ren'Py](https://img.shields.io/badge/Ren%27Py-7.x_%7C_8.x-e9547b)](https://www.renpy.org/)
 
+<a href="https://github.com/yschdxm/renpy-translator">
+  <img src="docs/give-star.png" alt="给个 Star 吧～" width="720">
+</a>
+
 </div>
 
 架构：FastAPI 后端 + Vue 3（Naive UI）前端，一份前端三种形态——系统托盘、
