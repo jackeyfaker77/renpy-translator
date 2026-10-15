@@ -23,6 +23,9 @@ AI 翻译 + 手动校对，支持解包/反编译、人名与角色分析、内�
   <img src="https://whale-star.whale-star.workers.dev/?repo=yschdxm/renpy-translator" alt="给个 Star 吧～" width="720">
 </a>
 
+> 🐳 顶部应援图来自 **[whale-star](https://github.com/yschdxm/whale-star)**——
+> 按 GitHub Star 数自动升档的大肥鱼 README 应援图服务，给自己的仓库也挂一条吧
+
 </div>
 
 架构：FastAPI 后端 + Vue 3（Naive UI）前端，一份前端三种形态——系统托盘、

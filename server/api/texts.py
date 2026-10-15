@@ -79,6 +79,31 @@ async def update_text(content_type: str, item_id: int, req: UpdateTextIn,
     return {'ok': True}
 
 
+@router.get('/texts/{content_type}/ids')
+async def list_text_ids(content_type: str, filter_mode: str = 'all',
+                        search: str = '', character: str = '',
+                        state: AppState = Depends(require_project)):
+    """当前筛选结果的全部 id（多选「全选筛选结果」用）"""
+    _check_ct(content_type)
+    ids = await state.db_call(state.db.get_ids_filtered, content_type,
+                              filter_mode, search, character)
+    return {'ids': ids}
+
+
+class ClearTextsIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=100000)
+
+
+@router.post('/texts/{content_type}/clear')
+async def clear_texts(content_type: str, req: ClearTextsIn,
+                      state: AppState = Depends(require_project)):
+    """批量清空所选条目的译文（回到未翻译，便于重翻）"""
+    _check_ct(content_type)
+    cleared = await state.db_call(state.db.clear_translations, content_type,
+                                  req.ids)
+    return {'cleared': cleared}
+
+
 @router.get('/texts/{content_type}/characters')
 async def list_characters(content_type: str,
                           state: AppState = Depends(require_project)):

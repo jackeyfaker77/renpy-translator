@@ -2,8 +2,8 @@
 /** 文本翻译页（UI 字符串 / 对话共用，contentType 区分） */
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
-  NButton, NCard, NDataTable, NEmpty, NInput, NModal, NPagination, NPopconfirm,
-  NSelect, NSpace, NSwitch, NText, NInputGroup, useMessage,
+  NButton, NCard, NCheckbox, NDataTable, NEmpty, NInput, NModal, NPagination,
+  NPopconfirm, NSelect, NSpace, NSwitch, NText, NInputGroup, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, DataTableSortState } from 'naive-ui'
 import { BookOutline, CodeSlashOutline, DownloadOutline, LanguageOutline, LocateOutline, RefreshOutline, ShareOutline, SparklesOutline, WarningOutline } from '@vicons/ionicons5'
@@ -142,10 +142,69 @@ async function clearText(row: Row) {
   }
 }
 
+// ---- 多选清空：勾选跨页保持，可全选筛选结果 / 本页全选 / 逐行手选 ----
+const selectedIds = ref<number[]>([])
+const selectedSet = computed(() => new Set(selectedIds.value))
+
+function toggleRow(id: number, v: boolean) {
+  const s = new Set(selectedIds.value)
+  if (v) s.add(id)
+  else s.delete(id)
+  selectedIds.value = [...s]
+}
+
+const pageChecked = computed(() =>
+  rows.value.length > 0 && rows.value.every((r) => selectedSet.value.has(r.id)))
+const pageIndeterminate = computed(() =>
+  !pageChecked.value && rows.value.some((r) => selectedSet.value.has(r.id)))
+
+function togglePage(v: boolean) {
+  const s = new Set(selectedIds.value)
+  for (const r of rows.value) {
+    if (v) s.add(r.id)
+    else s.delete(r.id)
+  }
+  selectedIds.value = [...s]
+}
+
+async function selectAllFiltered() {
+  try {
+    const params = new URLSearchParams({
+      filter_mode: query.filter_mode, search: query.search,
+      character: query.character,
+    })
+    const data = await api.get<{ ids: number[] }>(
+      `/api/current/texts/${props.contentType}/ids?${params}`)
+    selectedIds.value = data.ids
+    toastOk(message, `已选中 ${data.ids.length} 条（全部筛选结果，含未显示页）`)
+  } catch (e) {
+    toastError(message, e)
+  }
+}
+
+async function clearSelected() {
+  if (!selectedIds.value.length) return
+  try {
+    const data = await api.post<{ cleared: number }>(
+      `/api/current/texts/${props.contentType}/clear`,
+      { ids: selectedIds.value })
+    toastOk(message, `已清空 ${data.cleared} 条译文`)
+    selectedIds.value = []
+    await load()
+  } catch (e) {
+    toastError(message, e)
+  }
+}
+
+function resetSelection() {
+  selectedIds.value = []
+}
+
 function searchKeydown(e: KeyboardEvent) {
   // 确认输入法候选字时不触发搜索和表格刷新。
   if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return
   query.page = 0
+  selectedIds.value = []  // 搜索范围变了，旧选择作废
   void load()
 }
 
@@ -418,6 +477,19 @@ async function saveGuide() {
 // ---- 表格列 ----
 const columns = computed<DataTableColumns<Row>>(() => {
   const cols: DataTableColumns<Row> = [
+    {
+      key: '_sel', width: 42, align: 'center',
+      // 表头勾选 = 本页全选；行勾选跨页保持（selectedIds 不随翻页清空）
+      title: () => h(NCheckbox, {
+        checked: pageChecked.value,
+        indeterminate: pageIndeterminate.value,
+        'onUpdate:checked': (v: boolean) => togglePage(v),
+      }),
+      render: (r) => h(NCheckbox, {
+        checked: selectedSet.value.has(r.id),
+        'onUpdate:checked': (v: boolean) => toggleRow(r.id, v),
+      }),
+    },
     { title: '#', key: 'id', width: 60 },
   ]
   if (isDialogue.value) {
@@ -469,7 +541,11 @@ onMounted(() => {
   void loadTranslateOptions()
 })
 
-watch(() => [query.filter_mode, query.character], () => { query.page = 0; load() })
+watch(() => [query.filter_mode, query.character], () => {
+  query.page = 0
+  selectedIds.value = []  // 筛选范围变了，旧选择作废
+  load()
+})
 </script>
 
 <template>
@@ -566,9 +642,21 @@ watch(() => [query.filter_mode, query.character], () => { query.page = 0; load()
           v-model:value="query.search" size="small" placeholder="搜索原文/译文"
           @keydown="searchKeydown"
         />
-        <n-button size="small" @click="query.page = 0; load()">搜索</n-button>
+        <n-button size="small" @click="query.page = 0; resetSelection(); load()">搜索</n-button>
       </n-input-group>
+      <n-button size="small" quaternary @click="selectAllFiltered">全选筛选结果</n-button>
       <n-text depth="3" style="font-size: 12px">共 {{ total }} 条</n-text>
+    </n-space>
+
+    <n-space v-if="selectedIds.length" align="center" style="margin-bottom: 10px">
+      <n-text strong style="color: #63e2b7">已选 {{ selectedIds.length }} 条</n-text>
+      <n-popconfirm @positive-click="clearSelected">
+        <template #trigger>
+          <n-button size="small" type="warning">清空所选译文</n-button>
+        </template>
+        确认清空所选 {{ selectedIds.length }} 条译文？清空后回到「未翻译」，可重新翻译。
+      </n-popconfirm>
+      <n-button size="small" quaternary @click="resetSelection">取消选择</n-button>
     </n-space>
 
     <n-data-table

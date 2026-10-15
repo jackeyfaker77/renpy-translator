@@ -101,6 +101,37 @@ def test_clear_translation_marks_untranslated(db):
     assert db.get_ui_text(u2['id'])['is_translated']
 
 
+def test_bulk_clear_and_ids_filter(db):
+    """多选清空：ids 按筛选取全量，clear 批量回退未翻译且不动筛选外的行"""
+    db.insert_dialogues([
+        dict(original_text='Line A', character='a', translated_text='甲',
+             is_translated=True),
+        dict(original_text='Line B', character='b', translated_text='乙',
+             is_translated=True),
+        dict(original_text='Line C', character='a', translated_text='',
+             is_translated=False),
+    ])
+    db.insert_ui_texts([
+        dict(original_text='OK', translated_text='好', is_translated=True),
+        dict(original_text='Load', translated_text='读取', is_translated=True),
+    ])
+    all_ids = db.get_ids_filtered('dialogue', 'all')
+    assert len(all_ids) == 3
+    # 角色筛选只取该角色的 id
+    assert db.get_ids_filtered('dialogue', 'all', character='a') == [
+        r['id'] for r in db.get_all_dialogues() if r['character'] == 'a']
+    # 只清已选两条：第三条不动
+    cleared = db.clear_translations('dialogue', all_ids[:2])
+    assert cleared == 2
+    rows = {r['id']: r for r in db.get_all_dialogues()}
+    assert not rows[all_ids[0]]['is_translated'] and rows[all_ids[0]]['translated_text'] == ''
+    assert not rows[all_ids[1]]['is_translated']
+    assert rows[all_ids[2]]['translated_text'] == ''      # 未译行不变
+    # ui 与空列表
+    assert db.clear_translations('ui', db.get_ids_filtered('ui')) == 2
+    assert db.clear_translations('dialogue', []) == 0
+
+
 def test_failed_count_excludes_duplicates_and_manually_corrected_rows(db):
     db.insert_dialogues([dict(original_text='Hello'), dict(original_text='Goodbye')])
     items = db.get_all_dialogues()

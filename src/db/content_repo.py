@@ -523,6 +523,35 @@ class ContentRepo:
         return [self._row_to_ui_dict(row) for row in rows]
 
     @_auto_reconnect
+    def get_ids_filtered(self, content_type: str, filter_mode: str = 'all',
+                         search: str = '', character: str = '') -> list:
+        """按筛选条件取全量 id（多选「全选筛选结果」用，只取 id 很轻）"""
+        if content_type == 'dialogue':
+            where_sql, params = self._dialogue_where(filter_mode, character, search)
+            table = 'dialogues'
+        else:
+            where_sql, params = self._ui_where(filter_mode, search)
+            table = 'ui_texts'
+        rows = self._conn.execute(
+            f"SELECT id FROM {table}{where_sql} ORDER BY id", params).fetchall()
+        return [r['id'] for r in rows]
+
+    @_auto_reconnect
+    def clear_translations(self, content_type: str, ids: list) -> int:
+        """批量清空译文（is_translated 回退 0），返回实际清空条数"""
+        if content_type not in ('dialogue', 'ui'):
+            raise ValueError('未知内容类型')
+        if not ids:
+            return 0
+        table = 'dialogues' if content_type == 'dialogue' else 'ui_texts'
+        marks = ','.join('?' * len(ids))
+        with self._transaction():
+            cur = self._conn.execute(
+                f"UPDATE {table} SET translated_text='', is_translated=0 "
+                f"WHERE id IN ({marks})", list(ids))
+            return cur.rowcount
+
+    @_auto_reconnect
     def replace_ui_texts(self, items: list[dict]) -> list[int]:
         """单事务清空并重建 UI 字符串表，返回与 items 对齐的新 id 列表"""
         ids = []
