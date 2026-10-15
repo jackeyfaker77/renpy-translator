@@ -1,4 +1,6 @@
 """文本翻译 API：UI 字符串与对话（分页/编辑/单翻/批翻任务/上下文/风格指南/重建出处）"""
+from typing import Optional
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -250,21 +252,41 @@ def _make_translate_job(state: AppState, content_type: str, items: list):
     return body
 
 
+class TranslateAllIn(BaseModel):
+    """范围参数：全量 = 缺省值；按筛选/按角色 = 传对应条件（所有页）"""
+    filter_mode: str = 'all'
+    search: str = ''
+    character: str = ''
+
+
 @router.post('/texts/{content_type}/translate-all')
 async def translate_all(content_type: str,
+                        req: Optional[TranslateAllIn] = None,
                         state: AppState = Depends(require_project)):
     _check_ct(content_type)
     _service(state)
+    scope = req or TranslateAllIn()
     if content_type == 'dialogue':
-        items = await state.db_call(state.db.get_untranslated_dialogues)
+        rows = await state.db_call(state.db.get_dialogues_filtered,
+                                   scope.filter_mode, scope.character,
+                                   scope.search)
     else:
-        items = await state.db_call(state.db.get_untranslated_ui_texts)
+        rows = await state.db_call(state.db.get_ui_texts_filtered,
+                                   scope.filter_mode, scope.search)
+    items = [r for r in rows if not (r.get('translated_text') or '').strip()]
     if not items:
         return {'job_id': None, 'message': '没有待翻译的内容'}
 
+    # 任务名体现范围，便于顶栏/进度里一眼看出在翻什么
+    if scope.character:
+        label = f'翻译角色台词（{scope.character}，{len(items)} 条）'
+    elif scope.filter_mode != 'all' or scope.search:
+        label = f'翻译当前筛选（{len(items)} 条）'
+    else:
+        label = f'全部翻译（{"对话" if content_type == "dialogue" else "字符串"}，{len(items)} 条）'
     job = state.jobs.create(
         f'texts.translate-all.{content_type}',
-        f'全部翻译（{"对话" if content_type == "dialogue" else "字符串"}）',
+        label,
         {'content_type': content_type},
         _make_translate_job(state, content_type, items),
         exclusive=True)

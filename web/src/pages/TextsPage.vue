@@ -2,8 +2,9 @@
 /** 文本翻译页（UI 字符串 / 对话共用，contentType 区分） */
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
-  NButton, NCard, NCheckbox, NDataTable, NEmpty, NInput, NModal, NPagination,
-  NPopconfirm, NSelect, NSpace, NSwitch, NText, NInputGroup, useMessage,
+  NButton, NCard, NCheckbox, NDataTable, NDropdown, NEmpty, NInput, NModal,
+  NPagination, NPopconfirm, NSelect, NSpace, NSwitch, NText, NInputGroup,
+  useDialog, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, DataTableSortState } from 'naive-ui'
 import { BookOutline, CodeSlashOutline, DownloadOutline, LanguageOutline, LocateOutline, RefreshOutline, ShareOutline, SparklesOutline, WarningOutline } from '@vicons/ionicons5'
@@ -399,18 +400,71 @@ async function onTranslateJobDone() {
   if (failedBatchCount.value > 0) failedDialogVisible.value = true
 }
 
-async function translateAll() {
-  await runJob(
-    () => api.post(`/api/current/texts/${props.contentType}/translate-all`),
-    onTranslateJobDone,
-    { emptyMessage: '没有待翻译的内容' })
-}
-
 async function translatePage() {
   await runJob(
     () => api.post(`/api/current/texts/${props.contentType}/translate-page`, { ...query }),
     onTranslateJobDone,
     { emptyMessage: '本页没有待翻译的内容' })
+}
+
+// ---- 全部翻译二级菜单：全部 / 当前筛选 / 指定角色，启动前先确认 ----
+//（任务取消要等当前批次结束，点错代价大——确认框是主要防呆）
+const dialog = useDialog()
+const roleModalVisible = ref(false)
+const rolePick = ref('')
+
+const roleOptions = computed(() =>
+  characters.value.filter((c) => c.value))
+
+const translateMenuOptions = computed(() => [
+  { key: 'all', label: '全部翻译（所有未翻译）' },
+  { key: 'filtered', label: `翻译当前筛选（共 ${total.value} 条）`, disabled: total.value === 0 },
+  ...(isDialogue.value ? [{ key: 'role', label: '翻译指定角色…' }] : []),
+])
+
+function confirmTranslate(title: string, content: string, request: () => Promise<{ job_id: string | null; message?: string }>, emptyMessage: string) {
+  dialog.warning({
+    title,
+    content,
+    positiveText: '开始翻译',
+    negativeText: '取消',
+    onPositiveClick: () => runJob(request, onTranslateJobDone, { emptyMessage }),
+  })
+}
+
+function onTranslateMenu(key: string) {
+  if (key === 'all') {
+    confirmTranslate(
+      '全部翻译',
+      '将翻译所有未翻译的文本。任务较大，且取消需等待当前批次结束——点错请尽快在进度条里停止。',
+      () => api.post(`/api/current/texts/${props.contentType}/translate-all`),
+      '没有待翻译的内容')
+  } else if (key === 'filtered') {
+    confirmTranslate(
+      '翻译当前筛选',
+      `将翻译当前筛选结果（共 ${total.value} 条）中未翻译的部分。确定开始？`,
+      () => api.post(`/api/current/texts/${props.contentType}/translate-all`, {
+        filter_mode: query.filter_mode, search: query.search, character: query.character,
+      }),
+      '筛选范围内没有待翻译的内容')
+  } else if (key === 'role') {
+    rolePick.value = ''
+    roleModalVisible.value = true
+  }
+}
+
+async function startRoleTranslate() {
+  if (!rolePick.value) {
+    message.warning('请选择角色')
+    return
+  }
+  roleModalVisible.value = false
+  await runJob(
+    () => api.post(`/api/current/texts/${props.contentType}/translate-all`, {
+      character: rolePick.value,
+    }),
+    onTranslateJobDone,
+    { emptyMessage: '该角色没有待翻译的台词' })
 }
 
 // ---- 上下文对话框 ----
@@ -553,7 +607,9 @@ watch(() => [query.filter_mode, query.character], () => {
     <n-space align="center" style="width: 100%; margin-bottom: 12px" wrap>
       <h2 style="margin: 0">{{ title }}</h2>
       <page-help style="margin-left: auto" :section="isDialogue ? '5,7' : '4,7'" />
-      <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)" @click="translateAll">全部翻译</n-button>
+      <n-dropdown :options="translateMenuOptions" @select="onTranslateMenu">
+        <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)">全部翻译 ▾</n-button>
+      </n-dropdown>
       <n-button size="small" @click="translatePage">翻译本页</n-button>
       <n-button size="small" @click="replacePreview = null; replaceVisible = true">查找并替换译文</n-button>
       <n-button size="small" :render-icon="renderIcon(ShareOutline)" @click="openExport">导出</n-button>
@@ -674,6 +730,25 @@ watch(() => [query.filter_mode, query.character], () => {
         @update:page="(p: number) => { query.page = p - 1; load() }"
       />
     </n-space>
+
+    <n-modal v-model:show="roleModalVisible" preset="card" title="翻译指定角色"
+             style="width: min(420px, 96vw)">
+      <n-space vertical>
+        <n-text depth="3" style="font-size: 12px">
+          只翻译该角色的未翻译台词，其他角色与页面筛选都不受影响。
+        </n-text>
+        <n-select v-model:value="rolePick" :options="roleOptions" filterable
+                  placeholder="选择角色" />
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="roleModalVisible = false">取消</n-button>
+          <n-button type="primary" :disabled="!rolePick" @click="startRoleTranslate">
+            开始翻译
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
 
     <n-modal :show="!!editRow" preset="card" title="编辑译文"
              style="width: min(960px, 96vw)" :mask-closable="false" :close-on-esc="false"
