@@ -22,7 +22,7 @@ interface ModelConfig {
   api_key: string
   model: string
   temperature: number | null
-  max_tokens: number
+  max_tokens: number | null
   context_lines: number
   timeout: number
   max_context: number
@@ -32,8 +32,14 @@ interface ModelConfig {
 }
 
 const configs = ref<ModelConfig[]>([])
-const sdkPath8 = ref('')
-const sdkPath7 = ref('')
+interface SdkInfo {
+  version: string
+  version_tuple: number[]
+  path: string
+  major: number
+  is_default: boolean
+}
+const sdkList = ref<SdkInfo[]>([])
 const sdkVersion = ref('')
 const guiMode = ref(false)
 
@@ -77,7 +83,7 @@ async function migrateDataDir() {
 
 const emptyForm = (): ModelConfig => ({
   name: '', api_base: 'https://api.openai.com/v1', api_key: '',
-  model: '', temperature: null, max_tokens: 1000, context_lines: 3,
+  model: '', temperature: null, max_tokens: null, context_lines: 3,
   timeout: 30, max_context: 8, batch_lines: 100, thinking: 'default',
 })
 
@@ -89,10 +95,9 @@ const testing = ref(false)
 async function refresh() {
   configs.value = await api.get<ModelConfig[]>('/api/configs')
   const settings = await api.get<{
-    sdk_path_8: string; sdk_path_7: string; data_dir: string
+    sdks: SdkInfo[]; data_dir: string
   }>('/api/settings')
-  sdkPath8.value = settings.sdk_path_8
-  sdkPath7.value = settings.sdk_path_7
+  sdkList.value = settings.sdks || []
   dataDir.value = settings.data_dir
   if (!newDataDir.value) newDataDir.value = settings.data_dir
 }
@@ -193,26 +198,26 @@ onMounted(async () => {
     <n-card size="small" title="Ren'Py SDK" style="margin-bottom: 16px">
       <n-space vertical>
         <n-text depth="3" style="font-size: 12px">
-          需要 7.x 与 8.x 两个版本：创建项目与导出校验会按游戏引擎自动选择；
-          缺失的大版本会在启动时自动下载补齐。SDK 固定安装在数据目录的 tools/ 下。
+          导出按游戏引擎版本精确匹配 SDK（如游戏 8.3.2 优先用 8.3.2），无精确匹配时退回同大版本最新；
+          缺失的 7.x/8.x 大版本会在启动时自动下载补齐。SDK 固定安装在数据目录的 tools/ 下。
         </n-text>
+        <template v-if="sdkList.length">
+          <n-space v-for="s in sdkList" :key="s.path" align="center">
+            <n-tag size="small" type="success"
+                   style="width: 66px; justify-content: center">{{ s.version }}</n-tag>
+            <n-tag v-if="s.is_default" size="small" type="warning"
+                   style="width: 48px; justify-content: center">默认</n-tag>
+            <n-text style="font-size: 13px">{{ s.path }}</n-text>
+          </n-space>
+        </template>
+        <n-text v-else depth="3" style="font-size: 13px">未安装任何 SDK</n-text>
         <n-space align="center">
-          <n-tag size="small" :type="sdkPath8 ? 'success' : 'default'"
-                 style="width: 66px; justify-content: center">Ren'Py 8</n-tag>
-          <n-text style="font-size: 13px">{{ sdkPath8 || '未安装' }}</n-text>
           <n-button size="small" :render-icon="renderIcon(CloudDownloadOutline)" @click="downloadSdk('8.5.3')">
-            {{ sdkPath8 ? '重新下载 8.5.3' : '下载 8.5.3' }}
+            下载 8.5.3
           </n-button>
-        </n-space>
-        <n-space align="center">
-          <n-tag size="small" :type="sdkPath7 ? 'success' : 'default'"
-                 style="width: 66px; justify-content: center">Ren'Py 7</n-tag>
-          <n-text style="font-size: 13px">{{ sdkPath7 || '未安装' }}</n-text>
           <n-button size="small" :render-icon="renderIcon(CloudDownloadOutline)" @click="downloadSdk('7.4.11')">
-            {{ sdkPath7 ? '重新下载 7.4.11' : '下载 7.4.11' }}
+            下载 7.4.11
           </n-button>
-        </n-space>
-        <n-space align="center">
           <n-text depth="3" style="font-size: 12px">其他版本：</n-text>
           <n-input v-model:value="sdkVersion" size="small" style="width: 90px" placeholder="如 8.4.1" />
           <n-button size="small" :disabled="!sdkVersion.trim()" @click="downloadSdk(sdkVersion.trim())">
@@ -274,7 +279,7 @@ onMounted(async () => {
     </n-card>
 
     <n-modal v-model:show="formVisible" preset="card"
-             :title="formEditing ? '编辑配置' : '新建配置'" style="width: 560px">
+             :title="formEditing ? '编辑配置' : '新建配置'" style="width: min(560px, 96vw)">
       <n-form label-placement="left" label-width="110">
         <n-form-item label="名称">
           <n-input v-model:value="form.name" :disabled="!!formEditing" />
@@ -294,8 +299,8 @@ onMounted(async () => {
                           placeholder="留空=模型默认（不发参数）" style="width: 100%" />
         </n-form-item>
         <n-form-item label="max_tokens">
-          <n-input-number v-model:value="form.max_tokens"
-                          placeholder="单次回复的输出上限（非上下文窗口）" style="width: 100%" />
+          <n-input-number v-model:value="form.max_tokens" clearable
+                          placeholder="留空=不设上限（推荐，不发参数，避免截断输出）" style="width: 100%" />
         </n-form-item>
         <n-form-item label="参考台词行数">
           <n-input-number v-model:value="form.context_lines" :min="0" :precision="0" />
@@ -332,8 +337,8 @@ onMounted(async () => {
         <n-text depth="3" style="font-size: 12px; margin-top: -12px">
           思考模式向请求体发送 thinking 参数（DeepSeek V4 / GLM / 豆包等支持；
           DeepSeek V4 默认即思考，选「关闭」才会显式关掉）。接口不支持时
-          「测试连接」会报 400，改回默认即可。开启时请加大 max_tokens
-          （思考内容也占输出额度）。
+          「测试连接」会报 400，改回默认即可。思考内容占输出额度——
+          max_tokens 留空（不设上限）时无需额外调整。
         </n-text>
       </n-form>
       <template #footer>
@@ -346,7 +351,7 @@ onMounted(async () => {
     </n-modal>
 
     <!-- 迁移中阻塞模态 -->
-    <n-modal :show="migrating" preset="card" title="正在迁移数据目录" style="width: 380px"
+    <n-modal :show="migrating" preset="card" title="正在迁移数据目录" style="width: min(380px, 96vw)"
              :mask-closable="false" :closable="false">
       <n-space align="center">
         <n-spin size="small" />

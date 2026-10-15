@@ -20,7 +20,7 @@ class ConfigIn(BaseModel):
     api_key: str = ''
     model: str = 'gpt-3.5-turbo'
     temperature: Optional[float] = None  # None=不发参数（跟随模型默认）
-    max_tokens: int = 1000
+    max_tokens: Optional[int] = None  # None=不发参数（跟随模型默认上限，避免截断输出）
     context_lines: int = 3
     timeout: int = 30
     max_context: int = 8
@@ -32,10 +32,10 @@ _THINKING_VALUES = ('default', 'enabled', 'disabled')
 
 
 def _validate(req: 'ConfigIn'):
-    # 不设上限：各家模型差异太大（deepseek-v4 输出可达 384K），
-    # 超限时 API 的 400 报错会带合法范围，保存时只拦无意义的非正值
-    if req.max_tokens < 1:
-        raise ApiError(400, 'BAD_MAX_TOKENS', 'max_tokens 必须为正整数')
+    # 默认不设上限（留空=不发 max_tokens，跟随模型默认）：小值会截断输出；
+    # 显式设置时只拦无意义的非正值
+    if req.max_tokens is not None and req.max_tokens < 1:
+        raise ApiError(400, 'BAD_MAX_TOKENS', 'max_tokens 必须为正整数（留空为不设上限）')
     if req.max_context < 1 or req.batch_lines < 1 or req.timeout < 1 or req.context_lines < 0:
         raise ApiError(400, 'BAD_LIMITS',
                        '上下文窗口、每批句数和超时必须为正整数，上下文行数不能为负数')
@@ -148,6 +148,8 @@ async def test_config(req: ConfigIn, state: AppState = Depends(get_state)):
         context_lines=req.context_lines, timeout=req.timeout,
         thinking=req.thinking,
     ))
+    # 连接测试同样进轨迹面板（此前是唯一漏挂回调的 LLM 路径）
+    translator.api_log_callback = state._on_api_log
     result = await state.run_sync(translator.test_connection)
     if not result.get('success'):
         raise ApiError(502, 'TEST_FAILED', result.get('error', '连接测试失败'))
@@ -160,9 +162,40 @@ async def test_config(req: ConfigIn, state: AppState = Depends(get_state)):
 async def get_settings(state: AppState = Depends(get_state)):
     # 只读展示：SDK 固定从默认目录 tools/ 扫描，不支持自定义路径
     paths = await state.run_sync(state.sdk_paths)
+    sdks = await state.run_sync(state.list_all_sdks)
     from rt_home import exe_dir, home
     return {'sdk_path_8': paths.get(8, ''), 'sdk_path_7': paths.get(7, ''),
+            'sdks': sdks,
             'data_dir': str(home()), 'exe_dir': str(exe_dir())}
+
+
+# ---- 全局偏好（白名单 KV）：与路径/环境类 settings 分开 ----
+
+_PREF_KEYS = {'api_log'}  # '1'/'0'：记录完整 LLM 请求/响应
+
+
+@router.get('/settings/prefs')
+async def get_prefs(state: AppState = Depends(get_state)):
+    return {k: await state.run_sync(state.app_db.get_setting, k, '0')
+            for k in sorted(_PREF_KEYS)}
+
+
+class PrefsIn(BaseModel):
+    api_log: Optional[str] = None
+
+
+@router.put('/settings/prefs')
+async def update_prefs(req: PrefsIn, state: AppState = Depends(get_state)):
+    values = req.model_dump(exclude_none=True)
+    unknown = set(values) - _PREF_KEYS
+    if unknown:
+        raise ApiError(400, 'BAD_PREF', f'未知设置项: {", ".join(sorted(unknown))}')
+    for k, v in values.items():
+        if v not in ('0', '1'):
+            raise ApiError(400, 'BAD_PREF', f'{k} 只能是 "0" 或 "1"')
+    for k, v in values.items():
+        await state.run_sync(state.app_db.set_setting, k, v)
+    return {'ok': True}
 
 
 class DataDirIn(BaseModel):

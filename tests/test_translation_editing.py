@@ -78,6 +78,29 @@ def test_context_lines_actually_limit_reference(db):
         service.close()
 
 
+def test_clear_translation_marks_untranslated(db):
+    """空译文=清空：is_translated 必须回退 0（单条 + 批量、whitespace 同样视为空）"""
+    db.insert_dialogues([
+        dict(original_text='Ami hello', translated_text='阿米', is_translated=True),
+        dict(original_text='Bye', translated_text='拜', is_translated=True),
+    ])
+    db.insert_ui_texts([
+        dict(original_text='OK', translated_text='好', is_translated=True),
+        dict(original_text='Cancel', translated_text='取消', is_translated=True),
+    ])
+    d1, d2 = db.get_all_dialogues()
+    db.update_dialogue(d1['id'], '')
+    assert db.get_dialogue(d1['id'])['translated_text'] == ''
+    assert not db.get_dialogue(d1['id'])['is_translated']
+    db.update_dialogues_batch([(d2['id'], '   ')])
+    assert not db.get_dialogue(d2['id'])['is_translated']
+    u1, u2 = db.get_all_ui_texts()
+    db.update_ui_text(u1['id'], '')
+    assert not db.get_ui_text(u1['id'])['is_translated']
+    db.update_ui_texts_batch([(u2['id'], '取消')])
+    assert db.get_ui_text(u2['id'])['is_translated']
+
+
 def test_failed_count_excludes_duplicates_and_manually_corrected_rows(db):
     db.insert_dialogues([dict(original_text='Hello'), dict(original_text='Goodbye')])
     items = db.get_all_dialogues()

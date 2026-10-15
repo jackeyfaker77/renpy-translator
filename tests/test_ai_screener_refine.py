@@ -45,7 +45,7 @@ class FakeTranslator:
         assert self.scripted, '脚本外的额外调用'
         return self.scripted.pop(0)
 
-    def analyze_text(self, prompt, max_tokens=None, temperature=None):
+    def analyze_text(self, prompt, max_tokens=None, temperature=None, task_type='analysis'):
         self.analyze_temps.append(temperature)
         return self.analyze_reply
 

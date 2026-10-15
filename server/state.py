@@ -8,9 +8,34 @@ import logging
 import shutil
 import sys
 import tempfile
+import threading
 from collections import deque
 from functools import partial
 from pathlib import Path
+
+_API_TYPE_LABELS = {
+    'name': '人名翻译', 'name_analysis': '人物分析', 'ui': '字符串翻译',
+    'dialogue': '对话翻译', 'analysis': '分析', 'screener': '内嵌预筛',
+    'graph': '关系图谱', 'scene': '场景摘要', 'export_fix': '导出修复',
+    'style_guide': '风格指南', 'test': '连接测试',
+}
+
+
+def _api_json_safe(obj):
+    """递归转 JSON 安全结构（openai pydantic → dict，未知对象 → str）。
+
+    既当 json.dumps 的 default 钩子，也用于内存 entry 的深度转换——
+    messages 里多轮 tool 循环会嵌 pydantic Message 对象。
+    """
+    if hasattr(obj, 'model_dump'):
+        obj = obj.model_dump()
+    if isinstance(obj, dict):
+        return {k: _api_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_api_json_safe(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    return str(obj)
 
 
 class _RingBufferHandler(logging.Handler):
@@ -101,6 +126,10 @@ class AppState:
         handler = _RingBufferHandler(self.log_buffer)
         handler.setFormatter(logging.Formatter())
         self.logger._logger.addHandler(handler)
+        # LLM 调用轨迹（结构化）：轨迹面板数据源，与 log_buffer（文本日志）分开
+        self.api_log_entries = deque(maxlen=200)
+        self._api_log_seq = 0
+        self._api_log_lock = threading.Lock()
 
         # 当前项目会话
         self.current_project: str = ''
@@ -287,7 +316,11 @@ class AppState:
     # ---- SDK 路径（固定默认目录 tools/，不支持自定义） ----
 
     def sdk_paths(self) -> dict:
-        """{8: path, 7: path}：默认目录下已安装的 SDK，每个大版本取最新"""
+        """{8: path, 7: path}：默认目录下已安装的 SDK，每个大版本取最新。
+
+        仅供 _ensure_sdks 判断「缺哪个大版本」；按游戏选 SDK 走
+        resolve_sdk_path（精确版本优先，不会漏掉同大版本的旧版）。
+        """
         from sdk_manager import find_installed_sdks
         best = {}
         for v, p in find_installed_sdks():
@@ -295,18 +328,34 @@ class AppState:
                 best[v[0]] = (v, str(p))
         return {m: p for m, (v, p) in best.items()}
 
-    def resolve_sdk_path(self, game_dir=None) -> str:
-        """按游戏目录的引擎大版本选 SDK；无游戏目录时返回主 SDK（8.x 优先）。
+    def list_all_sdks(self) -> list:
+        """全部已安装 SDK：[{version, version_tuple, path, major, is_default}]，版本降序。
 
-        游戏版本可探测但对应大版本未安装时返回 ''（调用方给出指引）。
+        is_default = 该大版本内最高版（sdk_paths 的选中项），仅供展示标注。
         """
-        from sdk_manager import detect_engine_version
-        paths = self.sdk_paths()
-        if game_dir is not None:
-            gv = detect_engine_version(Path(game_dir))
-            if gv:
-                return paths.get(gv[0], '')
-        return paths.get(8) or next(iter(paths.values()), '')
+        from sdk_manager import find_installed_sdks
+        entries = [{'version': '.'.join(map(str, v)), 'version_tuple': list(v),
+                    'path': str(p), 'major': v[0]}
+                   for v, p in find_installed_sdks()]
+        best = {}
+        for e in entries:
+            cur = best.get(e['major'])
+            if cur is None or e['version_tuple'] > cur['version_tuple']:
+                best[e['major']] = e
+        for e in entries:
+            e['is_default'] = best.get(e['major']) is e
+        entries.sort(key=lambda e: e['version_tuple'], reverse=True)
+        return entries
+
+    def resolve_sdk_path(self, game_dir=None) -> str:
+        """按游戏目录的引擎版本选 SDK；无游戏目录时返回主 SDK（8.x 优先）。
+
+        三级匹配（sdk_manager.pick_sdk）：精确 x.y.z → 同大版本最新 → ''。
+        游戏版本可探测但同大版本无安装时返回 ''（调用方给出指引）。
+        """
+        from sdk_manager import detect_engine_version, find_installed_sdks, pick_sdk
+        gv = detect_engine_version(Path(game_dir)) if game_dir is not None else None
+        return pick_sdk(find_installed_sdks(), gv)
 
     # ---- 项目会话 ----
 
@@ -330,7 +379,7 @@ class AppState:
         from translator import AITranslator, TranslationConfig
         from translation_service import TranslationService
         translator = None
-        max_context_k, max_tokens, batch_lines = 8, 1000, 100
+        max_context_k, max_tokens, batch_lines = 8, None, 100
         cfg = await loop.run_in_executor(None, self._current_model_config, db)
         if cfg:
             translator = AITranslator(TranslationConfig(
@@ -342,7 +391,7 @@ class AppState:
             ))
             translator.api_log_callback = self._on_api_log
             max_context_k = getattr(cfg, 'max_context', 8)
-            max_tokens = getattr(cfg, 'max_tokens', 1000)
+            max_tokens = getattr(cfg, 'max_tokens', None)
             batch_lines = getattr(cfg, 'batch_lines', 100)
 
         service = None
@@ -381,7 +430,7 @@ class AppState:
             if not mc:
                 return None
             return (getattr(mc, 'max_context', 8),
-                    getattr(mc, 'max_tokens', 1000),
+                    getattr(mc, 'max_tokens', None),
                     getattr(mc, 'batch_lines', 100))
         return config_provider
 
@@ -407,7 +456,7 @@ class AppState:
             thinking=getattr(cfg, 'thinking', 'default'),
         )
         max_context_k = getattr(cfg, 'max_context', 8)
-        max_tokens = getattr(cfg, 'max_tokens', 1000)
+        max_tokens = getattr(cfg, 'max_tokens', None)
         batch_lines = getattr(cfg, 'batch_lines', 100)
 
         if self.translator is not None:
@@ -623,38 +672,54 @@ class AppState:
     # api.log 超过该尺寸滚动为 api.log.1（只保留两代，防长期开启撑爆磁盘）
     _API_LOG_MAX_BYTES = 5 * 1024 * 1024
 
-    def _on_api_log(self, request_body: dict, response_body: dict, task_type: str):
-        """API 日志回调：完整请求体/返回体写入 logs/api.log（API_LOG 环境变量控制）
+    def _on_api_log(self, request_body: dict, response_body: dict,
+                    task_type: str, meta: dict = None):
+        """API 日志回调：结构化 entry 进内存 deque（轨迹面板）+ 文件双写
 
-        该回调在翻译线程中触发，文件写入需加锁。
+        门控：API_LOG 环境变量强制开 OR settings 的 api_log 开关
+        （环境变量是排障总闸）。meta = {ok, duration_ms, attempt, error}，
+        失败/重试耗尽也记（响应体 {'error': ...}）。该回调在翻译线程中触发，
+        内存与文件写入都需加锁。
         """
         import json
         import os
-        import threading
         from datetime import datetime
-        if not os.environ.get('API_LOG'):
-            return
-        if self._api_log_lock is None:
-            self._api_log_lock = threading.Lock()
+        env_on = bool(os.environ.get('API_LOG'))
+        if not env_on:
+            try:
+                if self.app_db.get_setting('api_log', '0') != '1':
+                    return
+            except Exception:
+                return
 
-        type_labels = {'name': '人名翻译', 'ui': '字符串翻译', 'dialogue': '对话翻译',
-                       'analysis': '分析', 'test': '连接测试'}
-        label = type_labels.get(task_type, task_type)
+        meta = meta or {'ok': True, 'duration_ms': 0, 'attempt': 1, 'error': ''}
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        usage = response_body.get('usage') if isinstance(response_body, dict) else None
 
-        # messages 里可能含 openai 的 pydantic Message 对象（多轮 tool 循环时），
-        # json.dumps 默认无法序列化会导致整轮日志被静默跳过
-        def _json_safe(obj):
-            if hasattr(obj, 'model_dump'):
-                return obj.model_dump()
-            return str(obj)
+        with self._api_log_lock:
+            self._api_log_seq += 1
+            self.api_log_entries.append({
+                'id': self._api_log_seq,
+                'ts': timestamp,
+                'duration_ms': meta.get('duration_ms', 0),
+                'ok': bool(meta.get('ok', True)),
+                'attempt': meta.get('attempt', 1),
+                'error': meta.get('error', ''),
+                'task_type': task_type,
+                'model': (request_body or {}).get('model', ''),
+                'usage': usage or {},
+                'request': _api_json_safe(request_body),
+                'response': _api_json_safe(response_body),
+            })
 
+        label = _API_TYPE_LABELS.get(task_type, task_type or '其他')
         entry = (
             f'{"=" * 70}\n'
-            f'[{timestamp}] {label}\n'
+            f'[{timestamp}] {label}'
+            f'{"" if meta.get("ok", True) else "（失败：" + str(meta.get("error", ""))[:120] + "）"}\n'
             f'{"=" * 70}\n'
-            f'[请求体]\n{json.dumps(request_body, ensure_ascii=False, indent=2, default=_json_safe)}\n\n'
-            f'[返回体]\n{json.dumps(response_body, ensure_ascii=False, indent=2, default=_json_safe)}\n\n'
+            f'[请求体]\n{json.dumps(request_body, ensure_ascii=False, indent=2, default=_api_json_safe)}\n\n'
+            f'[返回体]\n{json.dumps(response_body, ensure_ascii=False, indent=2, default=_api_json_safe)}\n\n'
         )
         log_path = self.root / 'logs' / 'api.log'
         with self._api_log_lock:
@@ -667,3 +732,26 @@ class AppState:
                     f.write(entry)
             except OSError as e:
                 print(f'[API日志] 写入失败: {e}')
+
+    def get_api_log_entries(self, limit: int = 50, task_type: str = '',
+                            before_id: int = 0) -> dict:
+        """轨迹面板数据源：线程安全快照（复制 deque，避免迭代中被写线程修改）
+
+        before_id>0 时只取 id 更小的（向前翻页），返回按时间正序。
+        """
+        with self._api_log_lock:
+            entries = list(self.api_log_entries)
+        if task_type:
+            entries = [e for e in entries if e['task_type'] == task_type]
+        if before_id:
+            entries = [e for e in entries if e['id'] < before_id]
+        entries = entries[-max(1, limit):]
+        import os
+        env_on = bool(os.environ.get('API_LOG'))
+        setting_on = False
+        try:
+            setting_on = self.app_db.get_setting('api_log', '0') == '1'
+        except Exception:
+            pass
+        return {'entries': entries, 'enabled': env_on or setting_on,
+                'env_forced': env_on}

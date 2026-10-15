@@ -6,6 +6,12 @@ from typing import Optional
 from .base import _auto_reconnect
 
 
+def _translated_flag(text: str) -> int:
+    """空译文视为未翻译：清空译文（或 AI 返回空）时 is_translated 必须回退 0，
+    否则「未翻译」筛选与统计会把空行当已译。"""
+    return 1 if (text or '').strip() else 0
+
+
 class ContentRepo:
     """dialogues + ui_texts 两表的读写（两表结构高度同构）"""
 
@@ -25,8 +31,8 @@ class ContentRepo:
             if current != (expected or ''):
                 return current
             self._conn.execute(
-                f'UPDATE {table} SET translated_text=?, is_translated=1 WHERE id=?',
-                (translated, item_id))
+                f'UPDATE {table} SET translated_text=?, is_translated=? WHERE id=?',
+                (translated, _translated_flag(translated), item_id))
             return translated
 
     @_auto_reconnect
@@ -95,20 +101,20 @@ class ContentRepo:
 
     @_auto_reconnect
     def update_dialogue(self, item_id: int, translated_text: str):
-        """翻译单条对话后保存"""
+        """翻译单条对话后保存（空译文=清空，is_translated 回退 0）"""
         self._conn.execute(
-            "UPDATE dialogues SET translated_text=?, is_translated=1 WHERE id=?",
-            (translated_text, item_id)
+            "UPDATE dialogues SET translated_text=?, is_translated=? WHERE id=?",
+            (translated_text, _translated_flag(translated_text), item_id)
         )
         self._conn.commit()
 
     @_auto_reconnect
     def update_dialogues_batch(self, updates: list[tuple[int, str]]):
-        """批量更新对话翻译"""
+        """批量更新对话翻译（空译文=清空，is_translated 回退 0）"""
         with self._transaction():
             self._conn.executemany(
-                "UPDATE dialogues SET translated_text=?, is_translated=1 WHERE id=?",
-                [(text, id_) for id_, text in updates]
+                "UPDATE dialogues SET translated_text=?, is_translated=? WHERE id=?",
+                [(text, _translated_flag(text), id_) for id_, text in updates]
             )
 
     @staticmethod
@@ -392,8 +398,8 @@ class ContentRepo:
     @_auto_reconnect
     def update_ui_text(self, item_id: int, translated_text: str):
         self._conn.execute(
-            "UPDATE ui_texts SET translated_text=?, is_translated=1 WHERE id=?",
-            (translated_text, item_id)
+            "UPDATE ui_texts SET translated_text=?, is_translated=? WHERE id=?",
+            (translated_text, _translated_flag(translated_text), item_id)
         )
         self._conn.commit()
 
@@ -401,8 +407,8 @@ class ContentRepo:
     def update_ui_texts_batch(self, updates: list[tuple[int, str]]):
         with self._transaction():
             self._conn.executemany(
-                "UPDATE ui_texts SET translated_text=?, is_translated=1 WHERE id=?",
-                [(text, id_) for id_, text in updates]
+                "UPDATE ui_texts SET translated_text=?, is_translated=? WHERE id=?",
+                [(text, _translated_flag(text), id_) for id_, text in updates]
             )
 
     @staticmethod

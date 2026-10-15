@@ -47,8 +47,7 @@ def summarize_scenes(scenes: list, translator,
     def _call(batch):
         prompt = prompt_store.render(
             'scene.summary', scenes_json=json.dumps(batch, ensure_ascii=False))
-        result = translator.analyze_text(
-            prompt, max_tokens=max(translator.config.max_tokens, 8000))
+        result = translator.analyze_text(prompt, task_type='scene')
         m = re.search(r'\[.*\]', result, re.S)
         if not m:
             raise ValueError(f'场景摘要返回无法解析: {result[:100]}')

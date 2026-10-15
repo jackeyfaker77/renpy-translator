@@ -322,8 +322,7 @@ class AIScreener:
             _COARSE_IDS[vote_idx % len(_COARSE_IDS)], items_json=items_json)
         result = self.translator.analyze_text(
             prompt,
-            max_tokens=max(self.translator.config.max_tokens, 8000),
-            temperature=0)
+            temperature=0, task_type='screener')
         m = re.search(r'\[.*\]', result, re.S)
         if not m:
             raise ValueError(f'粗筛返回无法解析: {result[:100]}')
@@ -492,9 +491,8 @@ class AIScreener:
                 messages=messages,
                 # 判定任务固定 0 温度（理由同粗筛）：重判可复现
                 temperature=0,
-                max_tokens=self.translator.config.max_tokens,
                 tools=_TOOLS, tool_choice="auto",
-                return_message=True, task_type='analysis',
+                return_message=True, task_type='screener',
             )
 
             if message.tool_calls:
@@ -572,8 +570,7 @@ class AIScreener:
             messages=messages,
             # 判定任务固定 0 温度（理由同多轮循环）：重判可复现
             temperature=0,
-            max_tokens=max(self.translator.config.max_tokens, 8000),
-            return_message=True, task_type='analysis',
+            return_message=True, task_type='screener',
         )
         if message.content:
             got = self._parse_verdicts_text(message.content, id_map)

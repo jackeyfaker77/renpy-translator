@@ -91,10 +91,11 @@ const pendingReview = () => review.value.filter((r) => r.status === 'pending')
 
 <template>
   <n-modal v-model:show="show" preset="card" :title="`版本更新报告 — ${projectName}`"
-           style="width: 860px; max-height: 85vh; overflow: auto">
+           style="width: min(860px, 96vw)">
+    <div class="modal-scroll">
     <n-spin :show="loading">
       <n-empty v-if="!loading && !report" description="该项目还没有执行过版本更新" />
-      <n-space v-else-if="report" vertical size="large">
+      <n-space v-else-if="report" vertical size="medium">
         <n-space>
           <n-statistic label="精确继承" :value="report.carried" />
           <n-statistic label="微改自动继承" :value="report.edited" />
@@ -166,6 +167,7 @@ const pendingReview = () => review.value.filter((r) => r.status === 'pending')
         </n-collapse>
       </n-space>
     </n-spin>
+    </div>
     <template #footer>
       <n-space justify="end">
         <n-button @click="show = false">关闭</n-button>

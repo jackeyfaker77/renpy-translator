@@ -6,8 +6,12 @@ token 魔数收敛到一处。所有调用点共用同一模型：
     可用额度 = 上下文窗口 - 固定开销（模板 + 实测术语表/角色特征）
     按行/按原文估算占用，并为输出预留余量
 
-四处调用点语义不同（对话批次原文上限 / 上下文行数 / 人名分析分段条数 /
-输出 max_tokens），分别对应 TokenBudget 的四个方法，但常数只有这一份。
+三处调用点语义不同（对话批次原文上限 / 上下文行数 / 人名分析分段条数），
+分别对应 TokenBudget 的三个方法，但常数只有这一份。
+
+注意：常数里的「输出预留」只用于**输入侧**分批（给生成留窗口空间）。
+API 请求默认不发 max_tokens（跟随模型默认上限，避免截断输出），
+输出预留值绝不能当 max_tokens 参数传给模型。
 """
 
 import tiktoken
@@ -51,12 +55,12 @@ class TokenBudget:
     PROMPT_TEMPLATE_TOKENS = 270   # 系统提示词模板（单句/上下文场景）
     BATCH_FIXED_TOKENS = 1000      # 批次模板 + 前文参考 + tool schema
     NAME_PROMPT_OVERHEAD = 800     # 人名分析提示词开销
-    NAME_OUTPUT_RESERVE = 2000     # 人名分析输出预留
+    NAME_OUTPUT_RESERVE = 2000     # 人名分析输出预留（仅输入侧分批，不发 API）
+    NAME_MAX_INPUT_LINES = 300     # 人物分析台词抽样上限（调研定的默认值）
     CONTEXT_LINE_TOKENS = 50       # 每行上下文（原文 + 译文 + 角色名）
     NAME_LINE_TOKENS = 20          # 每条台词（英文平均）
     OUTPUT_RATIO = 1.2             # 输出 / 原文放大系数
     OUTPUT_FLOOR = 300             # 输出基础余量（格式开销）
-    MIN_OUTPUT_TOKENS = 1000       # 窗口约束下的 max_tokens 下限
     NAME_USAGE_RATIO = 0.6         # 人名分析安全系数（只用 60% 可用空间）
 
     def __init__(self, window_tokens: int):
@@ -67,14 +71,16 @@ class TokenBudget:
                                declared_max_tokens: int = 0) -> int:
         """对话批次原文 token 上限
 
-        约束：固定开销 + 原文 + 输出(原文×1.2+300) ≤ 窗口，
-        且 输出 ≤ 模型声明 max_tokens。
+        约束：固定开销 + 原文 + 输出(原文×1.2+300) ≤ 窗口。
+        declared_max_tokens > 0 时（用户显式设了输出安全上限）再参与 min；
+        0/None 表示输出不设上限（默认行为，API 不发 max_tokens），
+        此时只受窗口约束。空间耗尽返回 0，不能虚构额度。
         """
         fixed = self.BATCH_FIXED_TOKENS + glossary_tokens + profile_tokens
         window_cap = int((self.window_tokens - fixed - self.OUTPUT_FLOOR)
                          / (1 + self.OUTPUT_RATIO))
-        # 声明 cap 无条件参与 min；空间耗尽时返回 0，不能虚构 500 token
-        # 的额度，否则新角色的资料已塞满窗口时仍会被并入现有批次。
+        if not declared_max_tokens or declared_max_tokens <= 0:
+            return max(0, window_cap)
         declared_cap = int((declared_max_tokens - self.OUTPUT_FLOOR)
                            / self.OUTPUT_RATIO)
         return max(0, min(window_cap, declared_cap))
@@ -95,17 +101,3 @@ class TokenBudget:
         size = max(10, int(available * self.NAME_USAGE_RATIO
                            / self.NAME_LINE_TOKENS))
         return min(size, total_lines)
-
-    def output_max_tokens(self, src_tokens: int, declared_max_tokens: int,
-                          input_tokens: int = None) -> int:
-        """批次翻译的输出 max_tokens
-
-        不低于模型声明值与原文估算输出的较大者；给出窗口与实际输入时，
-        再钳制到 窗口 - 实际输入（deepseek 等超限直接 400），保底 1000。
-        """
-        budget = max(declared_max_tokens,
-                     int(src_tokens * self.OUTPUT_RATIO) + self.OUTPUT_FLOOR)
-        if self.window_tokens and input_tokens is not None:
-            budget = min(budget, max(self.MIN_OUTPUT_TOKENS,
-                                     self.window_tokens - input_tokens))
-        return budget

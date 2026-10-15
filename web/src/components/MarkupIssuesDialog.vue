@@ -146,7 +146,7 @@ function shortFile(f: string) {
 
 <template>
   <n-modal
-    :show="show" preset="card" style="width: 900px; max-width: 95vw"
+    :show="show" preset="card" style="width: min(900px, 96vw)"
     title="修订标记违规译文" :mask-closable="false"
     @update:show="(v: boolean) => emit('update:show', v)"
   >
@@ -170,7 +170,8 @@ function shortFile(f: string) {
           v-if="!loading && items.length === 0"
           description="没有违规条目，可以直接导出"
         />
-        <n-space v-else vertical size="medium">
+        <div v-else class="modal-scroll">
+        <n-space vertical size="medium">
           <div
             v-for="it in pageItems" :key="key(it)"
             style="border: 1px solid rgba(255,255,255,0.09); border-radius: 6px; padding: 10px"
@@ -209,12 +210,13 @@ function shortFile(f: string) {
               >AI 重译</n-button>
             </n-space>
           </div>
-          <n-space justify="center">
-            <n-pagination
-              v-if="pageCount > 1" v-model:page="page" :page-count="pageCount"
-              size="small"
-            />
-          </n-space>
+        </n-space>
+        </div>
+        <n-space justify="center" style="margin-top: 8px">
+          <n-pagination
+            v-if="pageCount > 1" v-model:page="page" :page-count="pageCount"
+            size="small"
+          />
         </n-space>
       </n-spin>
     </n-space>

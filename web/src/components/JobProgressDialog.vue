@@ -52,7 +52,7 @@ watch(isTerminal, (v) => { if (v) emit('finished', props.job) })
     :show="job.dialogOpen"
     preset="card"
     :title="job.label || '任务'"
-    :style="{ width: job.question?.type === 'embedded_review' ? '980px' : '640px' }"
+    :style="{ width: job.question?.type === 'embedded_review' ? 'min(980px, 96vw)' : 'min(640px, 96vw)' }"
     :mask-closable="false"
     @update:show="onClose"
   >

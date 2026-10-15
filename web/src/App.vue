@@ -36,4 +36,14 @@ import AppInner from './AppInner.vue'
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* 模态框长列表统一约定：
+   - n-modal 一律 width: min(Xpx, 96vw)，窄窗不横向溢出；
+   - 长列表/长内容包进 .modal-scroll——只滚内容区，标题与页脚固定可见；
+   - 不要给整张卡设 overflow（标题/按钮会跟着滚走）。
+   高度用视口占比，替代各处写死的 px/vh。 */
+.modal-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+}
 </style>

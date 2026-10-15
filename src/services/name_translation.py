@@ -9,6 +9,7 @@ import asyncio
 import re
 from concurrent.futures import ThreadPoolExecutor
 
+import line_sampling
 from database import ProjectDatabase
 from logger import TranslationLogger
 from prompts import (build_analyze_only_prompt, build_continue_prompt,
@@ -17,18 +18,46 @@ from token_budget import TokenBudget
 from translation_service import TranslationService
 from translator import AITranslator, FatalAPIError, clean_name_result
 
-PROFILE_KEYS = ['性格特点', '外貌特征', '说话风格', '行为习惯',
-                '人物关系', '背景故事', '角色定位', '翻译建议']
+PROFILE_KEYS = ['性格特点', '外貌特征', '说话风格', '口癖与口头禅', '称谓习惯',
+                '行为习惯', '人物关系', '背景故事', '角色定位', '代表台词',
+                '语气词建议', '翻译建议']
 
 
-def calc_batch_size(total_lines: int, max_context_k: int) -> int:
-    """根据模型上下文大小动态计算每段台词数
+def split_self_check(text: str) -> tuple:
+    """切出【自检】段：其行会被 parse_profile 误并入上一个键的值，
+    解析档案前必须剥掉；补样/合并时保留全文（自检是定向补样的依据）。"""
+    idx = (text or '').find('【自检】')
+    if idx < 0:
+        return text or '', ''
+    return text[:idx], text[idx:]
 
-    可用 token = 模型上下文 - 提示词开销 - 输出预留；
-    每条台词约 20 token（英文平均），为安全起见只用 60% 可用空间。
-    常数集中在 token_budget.TokenBudget。
-    """
-    return TokenBudget(max_context_k * 1024).name_batch_size(total_lines)
+
+def format_lines(rows) -> str:
+    return '\n'.join(f'"{r["original_text"]}"' for r in rows)
+
+
+def format_style_signals(signals: dict, evidence: dict) -> str:
+    """line_sampling 统计结果 → 提示词文本；空结果返回 ''（可选段整段消失）"""
+    parts = []
+    tics = signals.get('tics') or []
+    if tics:
+        parts.append('口癖候选：' + '、'.join(
+            f"{t['word']}（{t['count']}句/{t['scenes']}幕）" for t in tics))
+    addrs = signals.get('addresses') or []
+    if addrs:
+        parts.append('称谓线索：' + '、'.join(
+            f"{a['form']}（{a['count']}次）" for a in addrs))
+    puncts = signals.get('punctuation') or []
+    if puncts:
+        parts.append('标点习惯：' + '、'.join(
+            f"{p['form']}（{p['count']}次）" for p in puncts))
+    if evidence.get('low_evidence'):
+        parts.append(f"证据规模：约 {evidence.get('words', 0)} 词"
+                     '（低于 3000 词，风格结论仅供参考）')
+    solo = evidence.get('single_scene_tics') or []
+    if solo:
+        parts.append('仅单幕出现（存疑，可能是场景用词）：' + '、'.join(solo))
+    return '\n'.join(parts)
 
 
 def extract_name(text: str) -> str:
@@ -212,7 +241,7 @@ class NameTranslationService:
 
         try:
             # 加载该角色的台词（有变量名直接查，同名显示名不会串）
-            def _load_lines():
+            def _load_rows():
                 var_name = variable
                 if not var_name:
                     variable_map = self.db.get_variable_map()
@@ -221,13 +250,12 @@ class NameTranslationService:
                             var_name = var
                             break
                 if var_name:
-                    dialogues = self.db.get_dialogues_by_character(var_name)
-                    return [d['original_text'] for d in dialogues]
+                    return self.db.get_dialogues_by_character(var_name)
                 return []
 
-            char_lines = await loop.run_in_executor(None, _load_lines)
+            char_rows = await loop.run_in_executor(None, _load_rows)
 
-            if not char_lines:
+            if not char_rows:
                 # 无台词角色：仅分析模式只留空档案；翻译经
                 # translate_name_only（带 variable 落库，同名不串）
                 self.logger.info(f'{label} 没有台词，仅翻译人名', panel='names')
@@ -242,45 +270,77 @@ class NameTranslationService:
 
             dict_text = await loop.run_in_executor(None, self._dict_text)
 
-            batch_size = calc_batch_size(len(char_lines), self.max_context_k)
-            batches = [char_lines[i:i+batch_size] for i in range(0, len(char_lines), batch_size)]
-            total_batches = len(batches)
+            # 零 LLM 预筛 + 槽位抽样（调研结论：均匀抽样漏稀缺口癖）；
+            # 预算 = 上限 300 句，且 Pass1（core ≈ 60%）要装进单次调用窗口
+            def _sample():
+                all_rows = self.db.get_all_dialogues()
+                per_call = TokenBudget(self.max_context_k * 1024).name_batch_size(
+                    len(char_rows))
+                budget = min(TokenBudget.NAME_MAX_INPUT_LINES,
+                             max(20, int(per_call / 0.6)))
+                return line_sampling.sample_for_analysis(
+                    char_rows, all_rows, budget=budget)
+
+            sample = await loop.run_in_executor(None, _sample)
+            style_signals = format_style_signals(sample['signals'],
+                                                 sample['evidence'])
+            core_rows, support_rows = sample['core'], sample['support']
+            if not core_rows and not support_rows:
+                # 全是极短句/模板句时打分会清空池：退回原始台词兜底
+                core_rows = char_rows[:30]
+            stats = sample['stats']
+            self.logger.info(
+                f'{label} 台词 {stats["total"]} 条（去重后 {stats["after_dedup"]}），'
+                f'抽样 {len(core_rows) + len(support_rows)} 条'
+                + ('（两段分析）' if support_rows else '（单次分析）'),
+                panel='names')
 
             cn_name = ''
             summaries = []
+            total_passes = 2 if support_rows else 1
 
-            for batch_idx, batch_lines in enumerate(batches):
+            # Pass1：core（口癖配额 + 通用启发式），带风格线索
+            action = '分析' if (is_placeholder or mode == 'analyze') else '翻译+分析'
+            self.logger.info(f'[1/{total_passes}] {action} {label}',
+                             panel='names')
+            lines_text = format_lines(core_rows)
+            if is_placeholder or mode == 'analyze':
+                prompt = self._build_analyze_only_prompt(
+                    label, lines_text, 0, total_passes, style_signals)
+            else:
+                prompt = self._build_translate_analyze_prompt(
+                    en_name, lines_text, 0, total_passes, dict_text,
+                    style_signals)
+
+            result = await loop.run_in_executor(
+                self._executor,
+                lambda: self.translator.analyze_text(prompt=prompt,
+                                                     task_type='name_analysis')
+            )
+            if mode != 'analyze':
+                cn_name = extract_name(result)
+            summaries.append(result)
+
+            # Pass2：support（剧情覆盖 + 探索槽），按 Pass1 自检定向补足。
+            # 取消即止：已成的 Pass1 是完整草稿，但计划要求取消不落库，
+            # 避免半截档案整覆盖已有档案
+            if support_rows:
                 if self._cancel:
-                    break
-
-                lines_text = '\n'.join([f'"{line}"' for line in batch_lines])
-
-                if batch_idx == 0:
-                    action = '分析' if (is_placeholder or mode == 'analyze') else '翻译+分析'
-                    self.logger.info(
-                        f'[{batch_idx+1}/{total_batches}] {action} {label}'
-                        f'（{len(char_lines)}条台词，每段{batch_size}条，上下文{self.max_context_k}K）',
-                        panel='names'
-                    )
-
-                    if is_placeholder or mode == 'analyze':
-                        prompt = self._build_analyze_only_prompt(
-                            label, lines_text, batch_idx, total_batches)
-                    else:
-                        prompt = self._build_translate_analyze_prompt(
-                            en_name, lines_text, batch_idx, total_batches, dict_text)
-                else:
-                    self.logger.info(f'[{batch_idx+1}/{total_batches}] 补充分析 {en_name}', panel='names')
-                    prompt = self._build_continue_prompt(
-                        en_name, lines_text, batch_idx, total_batches, summaries)
-
+                    self.logger.info(f'{label} 已取消，丢弃未完成分析', panel='names')
+                    await self._emit_done(label)
+                    return
+                self.logger.info(f'[2/{total_passes}] 补充分析 {label}', panel='names')
+                prompt = self._build_continue_prompt(
+                    label, format_lines(support_rows), 1, 2, summaries)
                 result = await loop.run_in_executor(
                     self._executor,
-                    lambda p=prompt: self.translator.analyze_text(prompt=p)
+                    lambda: self.translator.analyze_text(prompt=prompt,
+                                                         task_type='name_analysis')
                 )
-
-                if batch_idx == 0 and mode != 'analyze':
-                    cn_name = extract_name(result)
+                if self._cancel:
+                    self.logger.info(f'{label} 已取消，丢弃未完成分析', panel='names')
+                    await self._emit_done(label)
+                    return
                 summaries.append(result)
 
             # 保存人名翻译（占位符与仅分析模式不翻译）
@@ -290,18 +350,18 @@ class NameTranslationService:
                 )
                 self.logger.info(f'人名: {en_name} -> {cn_name}', panel='names')
 
-            # 合并所有分析结果
-            if summaries:
-                if len(summaries) == 1:
-                    profile = parse_profile(summaries[0])
-                else:
-                    profile = await self._merge_summaries(label, summaries)
+            # 解析/合并档案（【自检】段不进 profile 解析）
+            if len(summaries) == 1:
+                head, _tail = split_self_check(summaries[0])
+                profile = parse_profile(head)
+            else:
+                profile = await self._merge_summaries(label, summaries)
 
-                if profile:
-                    await loop.run_in_executor(
-                        None, lambda: self.db.save_profile(en_name, profile, variable=variable)
-                    )
-                    self.logger.info(f'{label} 分析完成', panel='names')
+            if profile:
+                await loop.run_in_executor(
+                    None, lambda: self.db.save_profile(en_name, profile, variable=variable)
+                )
+                self.logger.info(f'{label} 分析完成', panel='names')
 
             await self._emit_done(label)
 
@@ -378,19 +438,26 @@ class NameTranslationService:
 
         result = await loop.run_in_executor(
             self._executor,
-            lambda: self.translator.analyze_text(prompt=prompt)
+            lambda: self.translator.analyze_text(prompt=prompt,
+                                                 task_type='name_analysis')
         )
         return parse_profile(result)
 
     # ---- 提示词构建（实现在 prompts.py） ----
 
     @staticmethod
-    def _build_analyze_only_prompt(en_name, lines_text, batch_idx, total_batches):
-        return build_analyze_only_prompt(en_name, lines_text, batch_idx, total_batches)
+    def _build_analyze_only_prompt(en_name, lines_text, batch_idx, total_batches,
+                                   style_signals=''):
+        return build_analyze_only_prompt(en_name, lines_text, batch_idx,
+                                         total_batches, style_signals)
 
     @staticmethod
-    def _build_translate_analyze_prompt(en_name, lines_text, batch_idx, total_batches, dict_text):
-        return build_translate_analyze_prompt(en_name, lines_text, batch_idx, total_batches, dict_text)
+    def _build_translate_analyze_prompt(en_name, lines_text, batch_idx,
+                                        total_batches, dict_text,
+                                        style_signals=''):
+        return build_translate_analyze_prompt(en_name, lines_text, batch_idx,
+                                              total_batches, dict_text,
+                                              style_signals)
 
     @staticmethod
     def _build_continue_prompt(en_name, lines_text, batch_idx, total_batches, summaries):

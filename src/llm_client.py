@@ -70,12 +70,14 @@ class LLMClient:
 
     MAX_RETRIES = 3  # 可重试错误的最大尝试次数
 
-    def __init__(self, config, api_log_callback: Optional[Callable[[dict, dict, str], None]] = None):
+    def __init__(self, config, api_log_callback: Optional[Callable[[dict, dict, str, dict], None]] = None):
         self.config = config
         self.client: Optional[OpenAI] = None
         self.last_cache_info = None  # 最近一次调用的 (缓存命中, 总输入) tokens
         self.api_log_callback = api_log_callback
-        # api_log_callback(request_body, response_body, task_type)
+        # api_log_callback(request_body, response_body, task_type, meta)
+        # meta = {ok, duration_ms, attempt, error}；失败/重试耗尽也回调
+        # （响应体为 {'error': ...}），避免「没日志=没请求」的误导
         self._init_client()
 
     def _init_client(self):
@@ -100,24 +102,41 @@ class LLMClient:
         - 可重试错误（421/429/5xx/超时/连接错误/空内容拦截）：指数退避重试，最多 MAX_RETRIES 次
         - 重试耗尽：抛出普通异常，调用方记失败并跳过该条目
         - return_message=True 时返回完整 message（用于 tool calls），否则返回 content 文本
-        - api_log_callback 存在时，成功响应后将完整请求体/返回体交给回调记录
+        - api_log_callback 存在时：成功记完整请求体/返回体，失败/重试耗尽
+          记精简条目（响应体 {'error': ...}），meta 带 ok/duration_ms/attempt
         - temperature / max_tokens 为 None 时取 config 默认值；
-          temperature 解析后仍为 None 时不发该参数（跟随模型默认）
+          解析后仍为 None 时不发该参数（跟随模型默认）——max_tokens 尤其
+          如此：发小值会截断输出，缺省即模型默认上限
         """
         if temperature is None:
             temperature = self.config.temperature
         if max_tokens is None:
             max_tokens = self.config.max_tokens
 
+        started = time.monotonic()
+
+        def _log(req, resp, ok, attempt, error=''):
+            if not self.api_log_callback:
+                return
+            try:
+                self.api_log_callback(
+                    req, resp, task_type,
+                    {'ok': ok, 'attempt': attempt, 'error': error,
+                     'duration_ms': int((time.monotonic() - started) * 1000)})
+            except Exception:
+                pass  # 日志失败不影响翻译
+
         reason = '未知错误'
+        kwargs = {}
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:
                 kwargs = dict(
                     model=self.config.model,
                     messages=messages,
-                    max_tokens=max_tokens,
                     timeout=self.config.timeout,
                 )
+                if max_tokens is not None:
+                    kwargs['max_tokens'] = max_tokens
                 if temperature is not None:
                     kwargs['temperature'] = temperature
                 thinking = getattr(self.config, 'thinking', 'default')
@@ -131,11 +150,7 @@ class LLMClient:
                     kwargs['tool_choice'] = tool_choice
                 response = self.client.chat.completions.create(**kwargs)
                 self.last_cache_info = _extract_cache_info(response)
-                if self.api_log_callback:
-                    try:
-                        self.api_log_callback(kwargs, response.model_dump(), task_type)
-                    except Exception:
-                        pass  # 日志失败不影响翻译
+                _log(kwargs, response.model_dump(), True, attempt)
                 message = response.choices[0].message
                 if return_message:
                     return message
@@ -147,7 +162,9 @@ class LLMClient:
             except openai.APIStatusError as e:
                 code = e.status_code
                 if code in _FATAL_REASONS:
-                    raise FatalAPIError(code, f'API 错误 {code}：{_FATAL_REASONS[code]}') from e
+                    err = f'API 错误 {code}：{_FATAL_REASONS[code]}'
+                    _log(kwargs, {'error': err}, False, attempt, err)
+                    raise FatalAPIError(code, err) from e
                 reason = _RETRYABLE_REASONS.get(code, f'HTTP {code} 错误')
             except openai.APITimeoutError:
                 reason = '请求超时'
@@ -159,4 +176,5 @@ class LLMClient:
                 print(f'[API] {reason}，{delay} 秒后进行第 {attempt + 1}/{self.MAX_RETRIES} 次尝试...')
                 time.sleep(delay)
 
+        _log(kwargs, {'error': reason}, False, self.MAX_RETRIES, reason)
         raise Exception(f'API 调用失败（已重试 {self.MAX_RETRIES} 次）：{reason}')

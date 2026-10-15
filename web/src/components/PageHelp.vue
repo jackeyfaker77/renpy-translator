@@ -2,7 +2,7 @@
 /** 页面帮助：顶部右侧 ? 按钮，弹出说明书对应章节（与 docs/使用说明.md 同源）
  *  section 支持逗号分隔多章节（如 '3,7'） */
 import { computed, ref } from 'vue'
-import { NButton, NModal, NScrollbar, NText, NTooltip } from 'naive-ui'
+import { NButton, NModal, NText, NTooltip } from 'naive-ui'
 import { HelpCircleOutline } from '@vicons/ionicons5'
 import { pageHelp } from '../helpContent'
 
@@ -31,8 +31,8 @@ const help = computed(() => {
 
   <n-modal v-model:show="show" preset="card"
            :title="help?.map((h) => h.title).join(' · ') || '使用说明'"
-           style="width: 720px; max-width: 92vw">
-    <n-scrollbar style="max-height: 70vh">
+           style="width: min(720px, 96vw)">
+    <div class="modal-scroll">
       <template v-if="help">
         <template v-for="(h, i) in help" :key="h.title">
           <div v-if="i > 0" style="border-top: 1px solid rgba(255,255,255,0.12); margin: 16px 0" />
@@ -40,7 +40,7 @@ const help = computed(() => {
         </template>
       </template>
       <n-text v-else depth="3">暂无本页说明</n-text>
-    </n-scrollbar>
+    </div>
   </n-modal>
 </template>
 

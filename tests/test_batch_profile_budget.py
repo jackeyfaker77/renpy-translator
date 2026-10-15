@@ -12,6 +12,16 @@ def test_exhausted_window_has_no_phantom_source_capacity():
         profile_tokens=4200, declared_max_tokens=10000) == 0
 
 
+def test_no_declared_output_cap_uses_window_only():
+    """declared_max_tokens<=0（默认不设输出上限）时只受窗口约束，不被假 cap 压小批次"""
+    budget = TokenBudget(4096)
+    window_only = budget.batch_src_token_budget(profile_tokens=0)
+    assert window_only == budget.batch_src_token_budget(
+        profile_tokens=0, declared_max_tokens=0)
+    assert window_only > budget.batch_src_token_budget(
+        profile_tokens=0, declared_max_tokens=500)
+
+
 @pytest.fixture
 def service(monkeypatch):
     # 固定估算，使测试覆盖分组行为而不依赖下载分词器。

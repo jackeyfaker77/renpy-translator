@@ -322,8 +322,7 @@ class ExportHealer:
             err_msg=error['msg'], original=original,
             current=current, context=context)
         try:
-            result = self.translator.analyze_text(
-                prompt, max_tokens=max(self.translator.config.max_tokens, 2000))
+            result = self.translator.analyze_text(prompt, task_type='export_fix')
             m = re.search(r'\{.*\}', result, re.S)
             if not m:
                 return '', ''

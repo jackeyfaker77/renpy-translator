@@ -23,7 +23,6 @@ from prompts import (
     build_user_prompt,
     get_analysis_system_prompt,
 )
-from token_budget import TokenBudget, count_tokens
 
 
 @dataclass
@@ -34,7 +33,8 @@ class TranslationConfig:
     model: str = "gpt-3.5-turbo"
     # 温度：None=不发参数（跟随模型默认，请求体省略 temperature）
     temperature: Optional[float] = None
-    max_tokens: int = 1000
+    # None=不发 max_tokens（跟随模型默认上限，避免截断输出）
+    max_tokens: Optional[int] = None
     context_lines: int = 3
     timeout: int = 30
     thinking: str = 'default'  # default/enabled/disabled，见 ModelConfig.thinking
@@ -508,14 +508,10 @@ class AITranslator:
             print(f'[批次翻译] 用户提示词:\n{user_prompt}')
             print(f'{"="*50}\n')
 
-        # 输出长度按批放大：译文长度通常不超过原文（英→中会缩短），1.2 倍余量确保不被截断；
-        # 给出上下文窗口时再钳制到 窗口 - 实际输入（deepseek 等服务超限直接返回 400）
-        est_input_tokens = sum(count_tokens(it.get('original_text', '')) for it in items)
-        actual_input = None
-        if context_window_tokens:
-            actual_input = count_tokens(system_prompt) + count_tokens(user_prompt)
-        max_tokens = TokenBudget(context_window_tokens or 0).output_max_tokens(
-            est_input_tokens, self.config.max_tokens, input_tokens=actual_input)
+        # 输出长度不设上限（config.max_tokens 默认 None=不发参数）：
+        # 任何显式小值都会截断译文/工具调用，缺省即模型默认上限。
+        # 窗口余量由输入侧预算（TokenBudget.batch_src_token_budget）保证。
+        max_tokens = self.config.max_tokens
 
         # Tool Calls：translations 用 {id, translation} 对象数组，靠 id 对齐
         n = len(items)
@@ -621,11 +617,14 @@ class AITranslator:
         return merged, terms_all, fail_reasons, rejected_all
 
     def analyze_text(self, prompt: str, max_tokens: int = None,
-                     temperature: float = None) -> str:
+                     temperature: float = None,
+                     task_type: str = 'analysis') -> str:
         """分析文本（不使用翻译系统提示词）
 
         temperature: 判定类任务（预筛/复核）传 0——同一输入必须给出
         同一判定，否则全部重判时结果随机翻转；缺省用配置温度（创作类）
+        task_type: API 日志分类标签（name_analysis/screener/graph/...），
+        缺省 'analysis' 向后兼容
         """
         if not self.client:
             raise ValueError("请先配置API Key")
@@ -640,15 +639,18 @@ class AITranslator:
             ],
             temperature=(self.config.temperature if temperature is None
                          else temperature),
-            max_tokens=max_tokens or self.config.max_tokens,
-            task_type='analysis',
+            # 输出不截断：config.max_tokens 默认 None=不发参数
+            max_tokens=(self.config.max_tokens if max_tokens is None
+                        else max_tokens),
+            task_type=task_type,
         )
 
     def generate_style_guide(self, sample_text: str) -> str:
         """根据台词抽样生成作品风格指南"""
         if not sample_text.strip():
             return ""
-        return self.analyze_text(build_style_guide_prompt(sample_text))
+        return self.analyze_text(build_style_guide_prompt(sample_text),
+                                 task_type='style_guide')
 
     def test_connection(self) -> Dict[str, Any]:
         """测试API连接"""

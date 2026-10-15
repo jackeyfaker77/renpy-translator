@@ -2,8 +2,8 @@
 /** 文本翻译页（UI 字符串 / 对话共用，contentType 区分） */
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
-  NButton, NDataTable, NEmpty, NInput, NModal, NPagination, NSelect, NSpace,
-  NText, NInputGroup, useMessage,
+  NButton, NCard, NDataTable, NEmpty, NInput, NModal, NPagination, NPopconfirm,
+  NSelect, NSpace, NSwitch, NText, NInputGroup, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, DataTableSortState } from 'naive-ui'
 import { BookOutline, CodeSlashOutline, DownloadOutline, LanguageOutline, LocateOutline, RefreshOutline, ShareOutline, SparklesOutline, WarningOutline } from '@vicons/ionicons5'
@@ -11,6 +11,7 @@ import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
 import FailedBatchesDialog from '../components/FailedBatchesDialog.vue'
+import ImportFromProjectDialog from '../components/ImportFromProjectDialog.vue'
 import ImportTextsDialog from '../components/ImportTextsDialog.vue'
 import PageHelp from '../components/PageHelp.vue'
 import { useJobTask } from '../composables/useJobTask'
@@ -43,6 +44,7 @@ const characters = ref<Array<{ label: string; value: string }>>([])
 const translatingIds = ref<Set<number>>(new Set())
 const failedBatchCount = ref(0)
 const failedDialogVisible = ref(false)
+const crossImportVisible = ref(false)
 
 const isDialogue = computed(() => props.contentType === 'dialogue')
 const title = computed(() => (isDialogue.value ? '对话翻译' : '字符串翻译'))
@@ -126,11 +128,104 @@ function editKeydown(e: KeyboardEvent) {
   }
 }
 
+// 行内一键清空译文：空串 PATCH 即清空，后端会把 is_translated 回退 0。
+async function clearText(row: Row) {
+  try {
+    await api.patch(`/api/current/texts/${props.contentType}/${row.id}`, {
+      translated_text: '',
+    })
+    row.translated_text = ''
+    toastOk(message, '译文已清空')
+    await load()
+  } catch (e) {
+    toastError(message, e)
+  }
+}
+
 function searchKeydown(e: KeyboardEvent) {
   // 确认输入法候选字时不触发搜索和表格刷新。
   if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return
   query.page = 0
   void load()
+}
+
+// ---- 翻译模式（深度/轻量/纯批量 + 细粒度开关，存项目 meta） ----
+interface TranslateFlags {
+  term_extract: boolean
+  glossary: boolean
+  style_guide: boolean
+  character_profile: 'full' | 'advice_only' | 'off'
+  context: boolean
+}
+const translatePreset = ref('deep')
+const translateFlags = ref<TranslateFlags>({
+  term_extract: true, glossary: true, style_guide: true,
+  character_profile: 'full', context: true,
+})
+const tuneOpen = ref(false)
+const savingOptions = ref(false)
+
+const presetLabels: Record<string, string> = {
+  deep: '深度', light: '轻量', bulk: '纯批量', custom: '自定义',
+}
+const presetHints: Record<string, string> = {
+  deep: '全效果：人物特征 + 术语提取 + 风格指南 + 上下文（质量优先）',
+  light: '轻量：仅术语表与「翻译建议」注入（成本减半）',
+  bulk: '纯批量：无任何附加效果（最快最省）',
+  custom: '自定义：手动微调了开关',
+}
+const presetOptions = computed(() => [
+  { label: '深度', value: 'deep' },
+  { label: '轻量', value: 'light' },
+  { label: '纯批量', value: 'bulk' },
+  ...(translatePreset.value === 'custom'
+    ? [{ label: '自定义', value: 'custom' }] : []),
+])
+const profileOptions = [
+  { label: '全量', value: 'full' },
+  { label: '仅翻译建议', value: 'advice_only' },
+  { label: '关闭', value: 'off' },
+]
+
+async function loadTranslateOptions() {
+  try {
+    const data = await api.get<{ preset: string; flags: TranslateFlags }>(
+      '/api/current/translate-options')
+    translatePreset.value = data.preset
+    translateFlags.value = data.flags
+  } catch { /* 无项目/接口失败不挡页面 */ }
+}
+
+async function applyPreset(v: string) {
+  if (v === 'custom' || savingOptions.value) return
+  savingOptions.value = true
+  try {
+    const data = await api.put<{ preset: string; flags: TranslateFlags }>(
+      '/api/current/translate-options', { preset: v })
+    translatePreset.value = data.preset
+    translateFlags.value = data.flags
+    toastOk(message, `翻译模式：${presetLabels[v] || v}`)
+  } catch (e) {
+    toastError(message, e)
+  } finally {
+    savingOptions.value = false
+  }
+}
+
+async function setFlag(key: keyof TranslateFlags, value: boolean | string) {
+  if (savingOptions.value) return
+  savingOptions.value = true
+  try {
+    const data = await api.put<{ preset: string; flags: TranslateFlags }>(
+      '/api/current/translate-options', { flags: { [key]: value } })
+    translatePreset.value = data.preset
+    translateFlags.value = data.flags
+  } catch (e) {
+    toastError(message, e)
+    await loadTranslateOptions()
+  } finally {
+    savingOptions.value = false
+  }
 }
 
 // 字面替换：当前筛选范围的全部页；预览签名防止后台翻译变化后误改。
@@ -345,7 +440,7 @@ const columns = computed<DataTableColumns<Row>>(() => {
     },
   })
   cols.push({
-    title: '操作', key: 'actions', width: 150,
+    title: '操作', key: 'actions', width: 185,
     render: (r) => h(NSpace, { size: 4 }, () => [
       h(NButton, {
         size: 'tiny', type: 'primary', quaternary: true,
@@ -355,6 +450,14 @@ const columns = computed<DataTableColumns<Row>>(() => {
       h(NButton, {
         size: 'tiny', quaternary: true, onClick: () => showContext(r),
       }, () => '上下文'),
+      ...(r.translated_text ? [h(NPopconfirm, {
+        onPositiveClick: () => clearText(r),
+      }, {
+        trigger: () => h(NButton, {
+          size: 'tiny', type: 'error', quaternary: true,
+        }, () => '清空'),
+        default: () => '确定清空该条译文？清空后可重新翻译。',
+      })] : []),
     ]),
   })
   return cols
@@ -363,6 +466,7 @@ const columns = computed<DataTableColumns<Row>>(() => {
 onMounted(() => {
   load()
   loadCharacters()
+  void loadTranslateOptions()
 })
 
 watch(() => [query.filter_mode, query.character], () => { query.page = 0; load() })
@@ -378,6 +482,7 @@ watch(() => [query.filter_mode, query.character], () => { query.page = 0; load()
       <n-button size="small" @click="replacePreview = null; replaceVisible = true">查找并替换译文</n-button>
       <n-button size="small" :render-icon="renderIcon(ShareOutline)" @click="openExport">导出</n-button>
       <n-button size="small" :render-icon="renderIcon(DownloadOutline)" @click="openImport">导入</n-button>
+      <n-button size="small" @click="crossImportVisible = true">从其他项目导入</n-button>
       <n-button
         v-if="failedBatchCount > 0" size="small" type="warning"
         :render-icon="renderIcon(WarningOutline)" @click="failedDialogVisible = true"
@@ -391,6 +496,56 @@ watch(() => [query.filter_mode, query.character], () => { query.page = 0; load()
     <n-text v-if="isDialogue" depth="3" style="display: block; margin-bottom: 10px; font-size: 12px">
       人名和角色分析可逐步补充，不必全员完成即可翻译；建议先设定主要角色的译名，减少人名不一致。
     </n-text>
+
+    <n-space align="center" style="margin-bottom: 10px" wrap>
+      <n-text depth="3" style="font-size: 12px">翻译模式</n-text>
+      <n-select
+        :value="translatePreset" size="small" style="width: 110px"
+        :options="presetOptions" :disabled="savingOptions"
+        @update:value="applyPreset"
+      />
+      <n-button size="small" quaternary @click="tuneOpen = !tuneOpen">
+        {{ tuneOpen ? '收起微调' : '微调' }}
+      </n-button>
+      <n-text depth="3" style="font-size: 12px">{{ presetHints[translatePreset] }}</n-text>
+    </n-space>
+
+    <n-card v-if="tuneOpen" size="small" style="margin-bottom: 10px">
+      <n-space align="center" wrap>
+        <n-space align="center">
+          <n-text style="font-size: 12px">术语提取</n-text>
+          <n-switch :value="translateFlags.term_extract" size="small"
+                    :disabled="savingOptions"
+                    @update:value="(v: boolean) => setFlag('term_extract', v)" />
+        </n-space>
+        <n-space align="center">
+          <n-text style="font-size: 12px">术语表注入</n-text>
+          <n-switch :value="translateFlags.glossary" size="small"
+                    :disabled="savingOptions"
+                    @update:value="(v: boolean) => setFlag('glossary', v)" />
+        </n-space>
+        <n-space align="center">
+          <n-text style="font-size: 12px">风格指南</n-text>
+          <n-switch :value="translateFlags.style_guide" size="small"
+                    :disabled="savingOptions"
+                    @update:value="(v: boolean) => setFlag('style_guide', v)" />
+        </n-space>
+        <n-space align="center">
+          <n-text style="font-size: 12px">角色特征</n-text>
+          <n-select
+            :value="translateFlags.character_profile" size="small" style="width: 120px"
+            :options="profileOptions" :disabled="savingOptions"
+            @update:value="(v: string) => setFlag('character_profile', v)"
+          />
+        </n-space>
+        <n-space align="center">
+          <n-text style="font-size: 12px">上下文</n-text>
+          <n-switch :value="translateFlags.context" size="small"
+                    :disabled="savingOptions"
+                    @update:value="(v: boolean) => setFlag('context', v)" />
+        </n-space>
+      </n-space>
+    </n-card>
 
     <n-space align="center" style="margin-bottom: 10px" wrap>
       <n-select
@@ -433,7 +588,7 @@ watch(() => [query.filter_mode, query.character], () => { query.page = 0; load()
     </n-space>
 
     <n-modal :show="!!editRow" preset="card" title="编辑译文"
-             style="width: min(960px, 94vw)" :mask-closable="false" :close-on-esc="false"
+             style="width: min(960px, 96vw)" :mask-closable="false" :close-on-esc="false"
              :closable="false">
       <n-space vertical>
         <n-text depth="3">原文 · #{{ editRow?.id }}</n-text>
@@ -451,14 +606,14 @@ watch(() => [query.filter_mode, query.character], () => { query.page = 0; load()
     </n-modal>
 
     <n-modal v-model:show="replaceVisible" preset="card" title="查找并替换译文"
-             style="width: min(960px, 94vw)" :mask-closable="false" :closable="!replacing"
+             style="width: min(960px, 96vw)" :mask-closable="false" :closable="!replacing"
              :close-on-esc="!replacing">
       <n-space vertical>
         <n-text>范围：当前{{ title }}的筛选结果（所有页）。只替换译文，按字面匹配、区分大小写。</n-text>
         <n-input v-model:value="replaceForm.find" :disabled="replacing" placeholder="查找，例如：阿米" />
         <n-input v-model:value="replaceForm.replacement" :disabled="replacing" placeholder="替换为，例如：亚美（留空即删除匹配文字）" />
         <n-text v-if="replacePreview">匹配 {{ replacePreview.count }} 条译文，共 {{ replacePreview.occurrences }} 处。下方预览前 30 条，请检查人名、变量和标签是否会被误改。</n-text>
-        <div v-if="replacePreview" style="max-height: 45vh; overflow: auto">
+        <div v-if="replacePreview" class="modal-scroll">
           <div v-for="sample in replacePreview.samples" :key="sample.id"
                style="padding: 10px 0; border-bottom: 1px solid #555; white-space: pre-wrap; overflow-wrap: anywhere">
             <div>#{{ sample.id }} · {{ sample.original_text }}</div>
@@ -478,7 +633,7 @@ watch(() => [query.filter_mode, query.character], () => { query.page = 0; load()
     </n-modal>
 
     <!-- 上下文对话框 -->
-    <n-modal v-model:show="contextVisible" preset="card" title="上下文" style="width: 640px">
+    <n-modal v-model:show="contextVisible" preset="card" title="上下文" style="width: min(640px, 96vw)">
       <div v-if="contextTarget" style="font-size: 13px">
         <div v-for="r in contextRows.before" :key="'b' + r.id" style="color: #888; padding: 2px 0">
           {{ r.character || '旁白' }}: {{ r.original_text }}
@@ -506,6 +661,11 @@ watch(() => [query.filter_mode, query.character], () => { query.page = 0; load()
       :filter-scope="exportFilter" @imported="onImported"
     />
 
+    <import-from-project-dialog
+      v-model:show="crossImportVisible" :preset-types="[contentType]"
+      @imported="onImported"
+    />
+
     <!-- 失败批次核验对话框 -->
     <failed-batches-dialog
       v-model:show="failedDialogVisible" :content-type="contentType"
@@ -513,7 +673,7 @@ watch(() => [query.filter_mode, query.character], () => { query.page = 0; load()
     />
 
     <!-- 风格指南对话框 -->
-    <n-modal v-model:show="guideVisible" preset="card" title="翻译风格指南" style="width: 720px">
+    <n-modal v-model:show="guideVisible" preset="card" title="翻译风格指南" style="width: min(720px, 96vw)">
       <n-input
         v-model:value="guideText" type="textarea" :autosize="{ minRows: 12, maxRows: 24 }"
         placeholder="描述译文的整体风格要求，AI 翻译时会遵循..."

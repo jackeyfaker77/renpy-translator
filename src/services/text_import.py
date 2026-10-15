@@ -191,6 +191,114 @@ def plan_digest(kind: str, plan: list[dict]) -> str:
         [kind, plan], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
+# ---- 跨项目导入（从其他项目复用已翻译文段）----
+
+_CROSS_TYPES = ('dialogue', 'ui', 'names')  # 术语表不在范围（维护者红线）
+
+
+def read_translated_pairs(source_db, types: list[str]) -> dict:
+    """从源项目库读已翻译对：{type: [(原文/显示名, 译文)]}，同 key 取最后"""
+    out = {}
+    for t in types:
+        if t not in _CROSS_TYPES:
+            raise ValueError('跨项目导入仅支持对话/UI/人名')
+        pairs = []
+        if t == 'dialogue':
+            for r in source_db.get_all_dialogues():
+                if r.get('is_translated') and (r.get('translated_text') or '').strip():
+                    pairs.append((r['original_text'], r['translated_text']))
+        elif t == 'ui':
+            for r in source_db.get_all_ui_texts():
+                if r.get('is_translated') and (r.get('translated_text') or '').strip():
+                    pairs.append((r['original_text'], r['translated_text']))
+        else:
+            for c in source_db.get_characters():
+                if (c.get('cn_name') or '').strip() and (c.get('display_name') or '').strip():
+                    pairs.append((c['display_name'], c['cn_name']))
+        latest = {}
+        for o, tr in pairs:
+            if o and tr:
+                latest[o] = tr
+        out[t] = list(latest.items())
+    return out
+
+
+def build_cross_project_plan(db, source_pairs: dict, types: list[str]) -> dict:
+    """跨项目导入预览分组（不落库）。分组语义：
+
+    - direct  自动匹配且当前未译 → 默认导入
+    - conflict 自动匹配、双方译文不同 → 逐条对比选择（默认保留当前）
+    - review  模糊匹配（相似但差距较大）→ 一律人工筛选
+    - same    自动匹配且译文相同 → 跳过，仅计数
+
+    每项 {type, key, original, current, incoming, score, kind}。
+    """
+    from text_fuzzy import match_texts
+    direct, conflict, review = [], [], []
+    same_count = {}
+    digest_plan = []
+
+    def _classify(t, key, original, current, incoming, score, kind,
+                  source_original=''):
+        row = {'type': t, 'key': key, 'original': original,
+               'source_original': source_original or original,
+               'current': current or '', 'incoming': incoming,
+               'score': score, 'kind': kind}
+        # current 进签名：预览后人工改过译文必须让 digest 失效
+        digest_plan.append({'type': t, 'key': key, 'original': original,
+                            'current': current or '', 'incoming': incoming,
+                            'score': score, 'kind': kind})
+        if kind == 'fuzzy':
+            review.append(row)
+        elif not (current or '').strip():
+            direct.append(row)
+        elif current.strip() == incoming.strip():
+            same_count[t] = same_count.get(t, 0) + 1
+        else:
+            conflict.append(row)
+
+    for t in types:
+        if t not in _CROSS_TYPES:
+            raise ValueError('跨项目导入仅支持对话/UI/人名')
+        pairs = dict(source_pairs.get(t, []))
+        if t == 'dialogue':
+            targets = [{'key': r['id'], 'original': r['original_text'],
+                        'translated': r.get('translated_text') or ''}
+                       for r in db.get_all_dialogues()]
+        elif t == 'ui':
+            targets = [{'key': r['id'], 'original': r['original_text'],
+                        'translated': r.get('translated_text') or ''}
+                       for r in db.get_all_ui_texts()]
+        else:
+            targets = [{'key': c['id'], 'original': c.get('display_name') or '',
+                        'translated': c.get('cn_name') or ''}
+                       for c in db.get_characters()
+                       if (c.get('display_name') or '').strip()]
+
+        if t == 'names':
+            # 人名是短标识：只认精确匹配，不做模糊
+            for tit in targets:
+                incoming = pairs.get(tit['original'])
+                if incoming:
+                    _classify(t, tit['key'], tit['original'],
+                              tit['translated'], incoming, 1.0, 'exact')
+        else:
+            by_key = {tit['key']: tit for tit in targets}
+            source_items = [{'key': o, 'original': o, 'translated': tr}
+                            for o, tr in pairs.items()]
+            matched = match_texts(targets, source_items)
+            for row in matched['auto'] + matched['fuzzy']:
+                tit = by_key[row['target_key']]
+                _classify(t, tit['key'], tit['original'], tit['translated'],
+                          row['source_translated'], row['score'], row['kind'],
+                          source_original=row.get('source_original', ''))
+
+    digest = plan_digest('cross_project', sorted(
+        digest_plan, key=lambda r: (r['type'], r['key'])))
+    return {'direct': direct, 'conflict': conflict, 'review': review,
+            'same': same_count, 'digest': digest}
+
+
 # ---- 应用（确认） ----
 
 def apply_plan(db, plan: list[dict]) -> dict:

@@ -1117,7 +1117,7 @@ async function saveAdd() {
 
     <!-- 立绘候选选择（随用随调，关闭即销毁） -->
     <n-modal v-model:show="avatarPickerOpen" preset="card" title="更换立绘"
-             style="width: 560px">
+             style="width: min(560px, 96vw)">
       <div class="avatar-grid picker">
         <img v-for="p in pagedAvatars" :key="p"
              :src="`/api/current/graph/avatar_circle/${encodeURIComponent(cardChar?.key || '')}?path=${encodeURIComponent(p)}`"
@@ -1126,18 +1126,19 @@ async function saveAdd() {
              alt="候选"
              @click="pickAvatar = p" />
       </div>
-      <n-space justify="space-between" align="center" style="margin-top: 12px">
-        <n-pagination v-if="avatarTotal > 12"
-                      v-model:page="avatarPage" :page-size="12"
+      <n-space v-if="avatarTotal > 12" justify="center" style="margin-top: 12px">
+        <n-pagination v-model:page="avatarPage" :page-size="12"
                       :item-count="avatarTotal" />
-        <n-space justify="end" style="flex: 1">
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
           <n-button @click="avatarPickerOpen = false">取消</n-button>
           <n-button type="primary" :disabled="!pickAvatar"
                     @click="applyAvatarPref">
             确定
           </n-button>
         </n-space>
-      </n-space>
+      </template>
     </n-modal>
 
     <!-- 边编辑抽屉 -->
@@ -1194,7 +1195,7 @@ async function saveAdd() {
     </n-drawer>
 
     <n-modal v-model:show="addOpen" preset="card" title="添加关系"
-             style="width: 440px">
+             style="width: min(440px, 96vw)">
       <n-form label-placement="top" size="small">
         <n-form-item label="角色 A">
           <n-select v-model:value="addForm.source" :options="charOptions"

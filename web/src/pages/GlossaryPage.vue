@@ -260,7 +260,7 @@ watch(() => query.source, () => { query.page = 0; load() })
     <import-texts-dialog v-model:show="importVisible" :preset-types="['glossary']" @imported="load" />
 
     <!-- 新增术语 -->
-    <n-modal v-model:show="createVisible" preset="card" title="新增术语" style="width: 480px">
+    <n-modal v-model:show="createVisible" preset="card" title="新增术语" style="width: min(480px, 96vw)">
       <n-space vertical>
         <n-input v-model:value="createForm.en_term" placeholder="原文（必填）" />
         <n-input v-model:value="createForm.cn_term" placeholder="译文" />

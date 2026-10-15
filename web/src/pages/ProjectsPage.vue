@@ -355,7 +355,7 @@ onMounted(async () => {
       </div>
     </n-card>
 
-    <n-modal v-model:show="editVisible" preset="card" title="重命名项目" style="width: 420px">
+    <n-modal v-model:show="editVisible" preset="card" title="重命名项目" style="width: min(420px, 96vw)">
       <n-input v-model:value="editName" placeholder="项目名称" />
       <template #footer>
         <n-space justify="end">
@@ -366,7 +366,7 @@ onMounted(async () => {
     </n-modal>
 
     <!-- 新建项目 -->
-    <n-modal v-model:show="createVisible" preset="card" title="新建项目" style="width: 520px">
+    <n-modal v-model:show="createVisible" preset="card" title="新建项目" style="width: min(520px, 96vw)">
       <n-space vertical>
         <n-input v-model:value="createName" placeholder="项目名称" />
         <n-radio-group v-model:value="createMethod" size="small">
@@ -407,7 +407,7 @@ onMounted(async () => {
     </n-modal>
 
     <!-- 更新版本 -->
-    <n-modal v-model:show="updateVisible" preset="card" :title="`更新版本 — ${updateName}`" style="width: 520px">
+    <n-modal v-model:show="updateVisible" preset="card" :title="`更新版本 — ${updateName}`" style="width: min(520px, 96vw)">
       <n-space vertical>
         <n-text depth="3" style="font-size: 12px">
           选择新版本游戏（目录或 zip）。现有译文、人名、术语、风格指南都会保留，
@@ -453,7 +453,7 @@ onMounted(async () => {
     <update-report-dialog v-model:show="reportVisible" :project-name="reportName" />
 
     <!-- 导入项目 -->
-    <n-modal v-model:show="importVisible" preset="card" title="导入项目" style="width: 480px">
+    <n-modal v-model:show="importVisible" preset="card" title="导入项目" style="width: min(480px, 96vw)">
       <n-space vertical>
         <n-input v-model:value="importName" placeholder="项目名称（留空则用包内名称）" />
         <file-drop-select

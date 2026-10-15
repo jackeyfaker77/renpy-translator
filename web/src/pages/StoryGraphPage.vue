@@ -1286,7 +1286,7 @@ function speakersOfFull(s: ApiScene) {
 
     <!-- 缩略图候选选择（随用随调，关闭即销毁） -->
     <n-modal v-model:show="pickerOpen" preset="card" title="更换缩略图"
-             style="width: 760px">
+             style="width: min(760px, 96vw)">
       <div class="thumb-grid picker">
         <img v-for="f in pagedThumbs" :key="f"
              :src="`/api/current/graph/story/thumb/${encodeURIComponent(f)}`"
@@ -1295,18 +1295,19 @@ function speakersOfFull(s: ApiScene) {
              alt="候选"
              @click="pickThumb = f" />
       </div>
-      <n-space justify="space-between" align="center" style="margin-top: 12px">
-        <n-pagination v-if="pickTotal > 9"
-                      v-model:page="pickPage" :page-size="9"
+      <n-space v-if="pickTotal > 9" justify="center" style="margin-top: 12px">
+        <n-pagination v-model:page="pickPage" :page-size="9"
                       :item-count="pickTotal" />
-        <n-space justify="end" style="flex: 1">
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
           <n-button @click="pickerOpen = false">取消</n-button>
           <n-button type="primary" :disabled="!pickThumb"
                     @click="applyThumb">
             确定
           </n-button>
         </n-space>
-      </n-space>
+      </template>
     </n-modal>
   </div>
 </template>

@@ -203,6 +203,9 @@ class _NameStubDB:
     def get_dialogues_by_character(self, var):
         return [{'original_text': t} for t in self._lines]
 
+    def get_all_dialogues(self):
+        return [{'original_text': t} for t in self._lines]
+
     def update_character_cn_name(self, display_name, cn_name, variable=None):
         self.cn_saved.append((display_name, cn_name, variable))
 
@@ -214,7 +217,7 @@ class _StubTranslator:
     def translate_name(self, name, glossary_text='', debug=False):
         return '里卡多'
 
-    def analyze_text(self, prompt=''):
+    def analyze_text(self, prompt='', **kwargs):
         return '【人名翻译】\n中文名：里卡多\n性格特点：急躁'
 
 
@@ -285,6 +288,9 @@ class _MultiStubDB(_NameStubDB):
                 for c in self.chars if c.get('display_name')}
 
     def get_dialogues_by_character(self, var):
+        return [{'original_text': t} for t in self._lines]
+
+    def get_all_dialogues(self):
         return [{'original_text': t} for t in self._lines]
 
     def update_character_cn_name(self, display_name, cn_name, variable=None):

@@ -188,6 +188,32 @@ def find_installed_sdks() -> list:
     return found
 
 
+def pick_sdk(installed: list, game_version=None) -> str:
+    """按游戏版本挑 SDK：精确 x.y.z → 同大版本最新 → ''。
+
+    installed: [(version_tuple, path)]，find_installed_sdks 的形状。
+    game_version: (x, y, z) 或 None。None（无游戏上下文/探测失败）时
+    8.x 最新优先，再任意最新——与旧版 sdk_paths 语义一致。
+    同大版本多装时精确匹配优先：游戏 8.3.2 就该用 8.3.2，
+    不能因为装了 8.5.3 就永远轮不到它（用户按游戏装 SDK 的场景）。
+    """
+    if not installed:
+        return ''
+    if game_version:
+        gv = tuple(game_version)
+        exact = [p for v, p in installed if tuple(v) == gv]
+        if exact:
+            return str(exact[0])
+        same_major = [(v, p) for v, p in installed if v[0] == gv[0]]
+        if same_major:
+            return str(max(same_major, key=lambda t: t[0])[1])
+        return ''
+    eight = [(v, p) for v, p in installed if v[0] == 8]
+    if eight:
+        return str(max(eight, key=lambda t: t[0])[1])
+    return str(max(installed, key=lambda t: t[0])[1])
+
+
 class SDKManager:
     """Ren'Py SDK 管理器"""
 

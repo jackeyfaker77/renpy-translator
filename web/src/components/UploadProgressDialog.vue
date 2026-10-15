@@ -25,7 +25,7 @@ function onClose() {
     :show="!!task"
     preset="card"
     :title="task?.label || '上传任务'"
-    style="width: 460px"
+    style="width: min(460px, 96vw)"
     :mask-closable="false"
     @update:show="(v: boolean) => { if (!v) onClose() }"
   >

@@ -108,39 +108,41 @@ async function submit() {
 </script>
 
 <template>
-  <n-modal :show="show" preset="card" title="导入翻译文本" style="width: 640px"
+  <n-modal :show="show" preset="card" title="导入翻译文本" style="width: min(640px, 96vw)"
            :mask-closable="!importing" :closable="!importing" :close-on-esc="!importing"
            @update:show="emit('update:show', $event)">
-    <n-space vertical size="medium">
-      <file-drop-select v-model="file" accept=".json,.docx"
-                        placeholder="点击或拖拽选择文件（.json / 翻译 .docx）" />
-      <n-text v-if="file && kind" depth="3" style="font-size: 12px">
-        {{ kind === 'json' ? 'JSON：按原文匹配写回译文' : '翻译 Word：按行顺序对应写回译文' }}
-      </n-text>
+    <div class="modal-scroll">
+      <n-space vertical size="medium">
+        <file-drop-select v-model="file" accept=".json,.docx"
+                          placeholder="点击或拖拽选择文件（.json / 翻译 .docx）" />
+        <n-text v-if="file && kind" depth="3" style="font-size: 12px">
+          {{ kind === 'json' ? 'JSON：按原文匹配写回译文' : '翻译 Word：按行顺序对应写回译文' }}
+        </n-text>
 
-      <!-- 翻译 Word：类型与范围需与导出时一致 -->
-      <template v-if="kind === 'tword'">
-        <div>
-          <n-text depth="3" style="font-size: 12px">
-            导入内容（翻译 Word 只含译文行，按顺序与库中条目一一对应，需与导出时一致）
-          </n-text>
-          <n-checkbox-group v-model:value="selectedTypes">
-            <n-space>
-              <n-checkbox v-for="(label, t) in TYPE_LABELS" :key="t" :value="t" :label="label" />
-            </n-space>
-          </n-checkbox-group>
-        </div>
-        <div v-if="filterUsable">
-          <n-text depth="3" style="font-size: 12px">范围</n-text>
-          <n-radio-group v-model:value="scope">
-            <n-space>
-              <n-radio value="all">全部</n-radio>
-              <n-radio value="filter">仅当前筛选结果（需与导出时相同筛选）</n-radio>
-            </n-space>
-          </n-radio-group>
-        </div>
-      </template>
-    </n-space>
+        <!-- 翻译 Word：类型与范围需与导出时一致 -->
+        <template v-if="kind === 'tword'">
+          <div>
+            <n-text depth="3" style="font-size: 12px">
+              导入内容（翻译 Word 只含译文行，按顺序与库中条目一一对应，需与导出时一致）
+            </n-text>
+            <n-checkbox-group v-model:value="selectedTypes">
+              <n-space>
+                <n-checkbox v-for="(label, t) in TYPE_LABELS" :key="t" :value="t" :label="label" />
+              </n-space>
+            </n-checkbox-group>
+          </div>
+          <div v-if="filterUsable">
+            <n-text depth="3" style="font-size: 12px">范围</n-text>
+            <n-radio-group v-model:value="scope">
+              <n-space>
+                <n-radio value="all">全部</n-radio>
+                <n-radio value="filter">仅当前筛选结果（需与导出时相同筛选）</n-radio>
+              </n-space>
+            </n-radio-group>
+          </div>
+        </template>
+      </n-space>
+    </div>
 
     <template #footer>
       <n-space justify="end">

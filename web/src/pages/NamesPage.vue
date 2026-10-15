@@ -10,6 +10,7 @@ import { DownloadOutline, LanguageOutline, RefreshOutline, ShareOutline } from '
 import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
+import ImportFromProjectDialog from '../components/ImportFromProjectDialog.vue'
 import ImportTextsDialog from '../components/ImportTextsDialog.vue'
 import PageHelp from '../components/PageHelp.vue'
 import { useInlineEdit } from '../composables/useInlineEdit'
@@ -35,6 +36,7 @@ const loading = ref(false)
 const processing = ref<Set<string>>(new Set())
 const exportVisible = ref(false)
 const importVisible = ref(false)
+const crossImportVisible = ref(false)
 async function onImported() {
   await load()
   await session.refresh()
@@ -317,6 +319,7 @@ onMounted(load)
       <n-button size="small" quaternary :loading="refreshLoading" @click="refreshCharacters">重新提取角色</n-button>
       <n-button size="small" :render-icon="renderIcon(ShareOutline)" @click="exportVisible = true">导出</n-button>
       <n-button size="small" :render-icon="renderIcon(DownloadOutline)" @click="importVisible = true">导入</n-button>
+      <n-button size="small" @click="crossImportVisible = true">从其他项目导入</n-button>
       <n-button size="small" quaternary :render-icon="renderIcon(RefreshOutline)" @click="load">刷新</n-button>
       <n-text depth="3" style="font-size: 12px">
         {{ stats.total }} 人名，翻译 {{ stats.translated }}，分析 {{ stats.analyzed }}
@@ -353,12 +356,17 @@ onMounted(load)
 
     <!-- 导入翻译文本对话框 -->
     <import-texts-dialog v-model:show="importVisible" :preset-types="['names']" @imported="onImported" />
+    <import-from-project-dialog
+      v-model:show="crossImportVisible" :preset-types="['names']" @imported="onImported"
+    />
 
     <n-modal v-model:show="profileVisible" preset="card"
-             :title="`${profileName} - 人物特征`" style="width: 640px">
-      <div v-for="(value, key) in profileData" :key="key" style="margin-bottom: 10px">
-        <n-text strong style="color: #7eb8ff">【{{ key }}】</n-text>
-        <div style="padding-left: 12px; white-space: pre-wrap; font-size: 13px">{{ value }}</div>
+             :title="`${profileName} - 人物特征`" style="width: min(640px, 96vw)">
+      <div class="modal-scroll">
+        <div v-for="(value, key) in profileData" :key="key" style="margin-bottom: 10px">
+          <n-text strong style="color: #7eb8ff">【{{ key }}】</n-text>
+          <div style="padding-left: 12px; white-space: pre-wrap; font-size: 13px">{{ value }}</div>
+        </div>
       </div>
     </n-modal>
   </div>

@@ -124,7 +124,7 @@ async function clearAll() {
 <template>
   <n-modal
     :show="show" preset="card" title="翻译失败的条目"
-    style="width: 820px" @update:show="emit('update:show', $event)"
+    style="width: min(820px, 96vw)" @update:show="emit('update:show', $event)"
   >
     <n-text depth="3" style="font-size: 12px; display: block; margin-bottom: 10px">
       以下条目在批次翻译中未译出（模型未返回或译文存疑）。AI 曾返回的译文已填进译文框，
@@ -152,7 +152,7 @@ async function clearAll() {
 
     <n-empty v-if="!loading && items.length === 0" description="没有翻译失败的条目" />
 
-    <div style="max-height: 480px; overflow-y: auto">
+    <div class="modal-scroll">
       <div v-for="it in items" :key="it.id"
            style="border: 1px solid #444; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px">
         <n-space align="center" justify="space-between" wrap style="margin-bottom: 4px">

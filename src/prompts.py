@@ -135,16 +135,20 @@ def build_style_guide_prompt(sample: str) -> str:
 
 # ========== 人名翻译 + 人物分析（services/name_translation 使用） ==========
 
-def build_analyze_only_prompt(en_name, lines_text, batch_idx, total_batches):
+def build_analyze_only_prompt(en_name, lines_text, batch_idx, total_batches,
+                              style_signals=''):
     return _render('name.analyze_only', en_name=en_name, lines_text=lines_text,
-                   batch_idx1=batch_idx + 1, total_batches=total_batches)
+                   batch_idx1=batch_idx + 1, total_batches=total_batches,
+                   style_signals=style_signals or '')
 
 
 def build_translate_analyze_prompt(en_name, lines_text, batch_idx,
-                                   total_batches, dict_text):
+                                   total_batches, dict_text,
+                                   style_signals=''):
     return _render('name.translate_analyze', en_name=en_name,
                    lines_text=lines_text, batch_idx1=batch_idx + 1,
-                   total_batches=total_batches, dict_block=dict_text or '')
+                   total_batches=total_batches, dict_block=dict_text or '',
+                   style_signals=style_signals or '')
 
 
 def build_continue_prompt(en_name, lines_text, batch_idx, total_batches,

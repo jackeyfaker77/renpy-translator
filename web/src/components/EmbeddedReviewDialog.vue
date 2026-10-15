@@ -5,7 +5,7 @@
  * 底：全选/全不选/仅选AI建议 | 取消 / 重判筛出 / 精判筛出 / 标记并重新生成模板
  */
 import { computed, ref, watch } from 'vue'
-import { NButton, NCheckbox, NInput, NPagination, NScrollbar, NSelect, NSpace, NTag, useMessage } from 'naive-ui'
+import { NButton, NCheckbox, NInput, NPagination, NSelect, NSpace, NTag, useMessage } from 'naive-ui'
 import { CodeOutline, SparklesOutline } from '@vicons/ionicons5'
 import { api, toastError } from '../api/client'
 import { useJobsStore, type JobView } from '../stores/jobs'
@@ -231,7 +231,7 @@ function truncate(s: string, n: number): string {
       define 期求值的数据在游戏中途切换语言不会更新（开局选中文或重启后正常）。
     </div>
 
-    <n-scrollbar style="max-height: 46vh">
+    <div class="modal-scroll">
       <div v-for="r in pagedRows" :key="r.id" style="padding: 3px 0; border-bottom: 1px solid #262626">
         <n-space align="center" :wrap="false" size="small">
           <n-checkbox
@@ -286,7 +286,7 @@ function truncate(s: string, n: number): string {
           :file="r.file" :line="r.line" :literal="r.raw"
         />
       </div>
-    </n-scrollbar>
+    </div>
     <n-pagination
       v-if="pageCount > 1" v-model:page="page" :page-count="pageCount"
       size="small" style="margin-top: 6px; justify-content: center"

@@ -91,9 +91,7 @@ def _call_ai(translator, chars: list, game_name: str,
         last_err = None
         for _ in range(3):
             try:
-                result = translator.analyze_text(
-                    prompt, max_tokens=max(translator.config.max_tokens,
-                                           8000))
+                result = translator.analyze_text(prompt, task_type='graph')
                 m = re.search(r'\{.*\}', result, re.S)
                 if not m:
                     raise ValueError(

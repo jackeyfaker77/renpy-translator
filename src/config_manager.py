@@ -16,7 +16,8 @@ class ModelConfig:
     api_key: str = ""
     model: str = "gpt-3.5-turbo"
     temperature: Optional[float] = None  # None=不发参数（跟随模型默认）
-    max_tokens: int = 1000
+    # None=不发 max_tokens（跟随模型默认上限，避免截断输出）；显式设置才作为安全上限发送
+    max_tokens: Optional[int] = None
     context_lines: int = 3
     timeout: int = 30
     max_context: int = 8  # 模型最大上下文（单位K）
@@ -74,6 +75,10 @@ class ConfigManager:
                 if "api_key_encoded" in item:
                     item["api_key"] = self._decode_api_key(item["api_key_encoded"])
                 item.pop("api_key_encoded", None)
+                # 旧默认值 1000 是历史默认而非用户选择：迁移为「不设上限」，
+                # 免得存量配置继续被 1000 截断输出（显式设置过的仍保留）
+                if item.get("max_tokens") == 1000:
+                    item["max_tokens"] = None
                 configs.append(ModelConfig(**item))
 
             self.active_config_name = data.get("active", "")

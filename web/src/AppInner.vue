@@ -36,6 +36,7 @@ const menuOptions: MenuOption[] = [
   { label: '导出游戏', key: '/export' },
   { label: '提示词设置', key: '/prompts' },
   { label: '模型配置', key: '/settings' },
+  { label: '诊断', key: '/diagnostics' },
 ]
 
 const activeKey = computed(() => route.path)
@@ -304,7 +305,7 @@ onUnmounted(() => {
   </n-layout>
 
   <!-- 自动重启遮罩（迁移后清理占用文件）：服务恢复后自动刷新页面 -->
-  <n-modal :show="restarting" preset="card" title="正在重启服务" style="width: 400px"
+  <n-modal :show="restarting" preset="card" title="正在重启服务" style="width: min(400px, 96vw)"
            :mask-closable="false" :closable="false">
     <n-space vertical>
       <span style="font-size: 13px; color: #ccc">
@@ -315,7 +316,7 @@ onUnmounted(() => {
   </n-modal>
 
   <!-- 服务停止遮罩（浏览器模式；GUI 窗口由看门狗自动关闭） -->
-  <n-modal :show="serverDown && !restarting" preset="card" title="服务已停止" style="width: 400px"
+  <n-modal :show="serverDown && !restarting" preset="card" title="服务已停止" style="width: min(400px, 96vw)"
            :mask-closable="false" :closable="false">
     <n-space vertical>
       <span style="font-size: 13px; color: #ccc">
@@ -327,16 +328,15 @@ onUnmounted(() => {
   </n-modal>
 
   <!-- 更新可用弹窗（手动/自动检查命中；下载在 GitHub Release 页） -->
-  <n-modal v-model:show="updateVisible" preset="card" title="发现新版本" style="width: 520px">
-    <n-space vertical size="small">
+  <n-modal v-model:show="updateVisible" preset="card" title="发现新版本" style="width: min(520px, 96vw)">
+    <n-space vertical size="medium">
       <n-text>当前版本 v{{ updateInfo?.current }}，最新版本 {{ updateInfo?.latest }}</n-text>
       <n-text depth="3" style="font-size: 12px">
         前往 GitHub Release 下载最新安装包，直接安装即可沿用原路径与数据。
       </n-text>
       <div v-if="updateInfo?.notes">
         <div style="font-weight: 600; margin: 8px 0 4px">更新说明</div>
-        <div style="font-size: 13px; color: #ccc; white-space: pre-line;
-                    max-height: 260px; overflow: auto">
+        <div class="modal-scroll" style="font-size: 13px; color: #ccc; white-space: pre-line">
           {{ updateInfo.notes }}
         </div>
       </div>

@@ -161,79 +161,81 @@ async function revealFile() {
 </script>
 
 <template>
-  <n-modal :show="show" preset="card" title="导出翻译文本" style="width: 640px"
+  <n-modal :show="show" preset="card" title="导出翻译文本" style="width: min(640px, 96vw)"
            :mask-closable="!exporting" :closable="!exporting" :close-on-esc="!exporting"
            @update:show="emit('update:show', $event)">
-    <!-- 结果态 -->
-    <n-space v-if="result" vertical>
-      <n-text>已导出：{{ result.file }}</n-text>
-      <n-text depth="3" style="font-size: 12px">
-        <template v-for="(n, t) in result.counts" :key="t">
-          {{ TYPE_LABELS[t as ExportType] }} {{ n }} 条&nbsp;&nbsp;
-        </template>
-      </n-text>
-      <n-space>
-        <n-button size="small" @click="revealFile">打开所在目录</n-button>
-        <a :href="downloadUrl" :download="result.file" style="text-decoration: none">
-          <n-button size="small" type="primary">下载文件</n-button>
-        </a>
-      </n-space>
-    </n-space>
-
-    <!-- 配置态 -->
-    <n-space v-else vertical size="medium">
-      <div>
-        <n-text depth="3" style="font-size: 12px">导出内容</n-text>
-        <n-checkbox-group v-model:value="selectedTypes">
-          <n-space>
-            <n-checkbox v-for="(label, t) in TYPE_LABELS" :key="t" :value="t" :label="label" />
-          </n-space>
-        </n-checkbox-group>
-      </div>
-
-      <div>
-        <n-text depth="3" style="font-size: 12px">格式</n-text>
-        <n-radio-group v-model:value="format">
-          <n-space>
-            <n-radio value="xlsx">Excel (.xlsx)</n-radio>
-            <n-radio value="docx">Word (.docx)</n-radio>
-            <n-radio value="tword">翻译 Word (.docx)</n-radio>
-            <n-radio value="txt">文本 (.txt)</n-radio>
-            <n-radio value="json">JSON (.json)</n-radio>
-          </n-space>
-        </n-radio-group>
-        <n-text v-if="isTword" depth="3" style="display: block; font-size: 12px">
-          仅导出原文、每条一行，除此之外什么都没有；译者翻好后用各页面的「导入」按行对应导回。
+    <div class="modal-scroll">
+      <!-- 结果态 -->
+      <n-space v-if="result" vertical>
+        <n-text>已导出：{{ result.file }}</n-text>
+        <n-text depth="3" style="font-size: 12px">
+          <template v-for="(n, t) in result.counts" :key="t">
+            {{ TYPE_LABELS[t as ExportType] }} {{ n }} 条&nbsp;&nbsp;
+          </template>
         </n-text>
-      </div>
+        <n-space>
+          <n-button size="small" @click="revealFile">打开所在目录</n-button>
+          <a :href="downloadUrl" :download="result.file" style="text-decoration: none">
+            <n-button size="small" type="primary">下载文件</n-button>
+          </a>
+        </n-space>
+      </n-space>
 
-      <template v-if="!isTword">
-        <div v-for="t in selectedTypes" :key="t">
-          <n-text depth="3" style="font-size: 12px">{{ TYPE_LABELS[t] }} · 导出列</n-text>
-          <n-checkbox-group v-model:value="selectedColumns[t]">
+      <!-- 配置态 -->
+      <n-space v-else vertical size="medium">
+        <div>
+          <n-text depth="3" style="font-size: 12px">导出内容</n-text>
+          <n-checkbox-group v-model:value="selectedTypes">
             <n-space>
-              <n-checkbox v-for="opt in COLUMN_OPTIONS[t]" :key="opt.value"
-                          :value="opt.value" :label="opt.label" />
+              <n-checkbox v-for="(label, t) in TYPE_LABELS" :key="t" :value="t" :label="label" />
             </n-space>
           </n-checkbox-group>
         </div>
-      </template>
 
-      <div v-if="filterUsable">
-        <n-text depth="3" style="font-size: 12px">范围（仅对{{ TYPE_LABELS[filterScope!.content_type] }}生效）</n-text>
-        <n-radio-group v-model:value="scope">
-          <n-space>
-            <n-radio value="all">全部</n-radio>
-            <n-radio value="filter" :disabled="!filterActive">仅当前筛选结果</n-radio>
-          </n-space>
-        </n-radio-group>
-        <n-text v-if="scope === 'filter'" depth="3" style="display: block; font-size: 12px">
-          {{ filterSummary }}
-        </n-text>
-      </div>
+        <div>
+          <n-text depth="3" style="font-size: 12px">格式</n-text>
+          <n-radio-group v-model:value="format">
+            <n-space>
+              <n-radio value="xlsx">Excel (.xlsx)</n-radio>
+              <n-radio value="docx">Word (.docx)</n-radio>
+              <n-radio value="tword">翻译 Word (.docx)</n-radio>
+              <n-radio value="txt">文本 (.txt)</n-radio>
+              <n-radio value="json">JSON (.json)</n-radio>
+            </n-space>
+          </n-radio-group>
+          <n-text v-if="isTword" depth="3" style="display: block; font-size: 12px">
+            仅导出原文、每条一行，除此之外什么都没有；译者翻好后用各页面的「导入」按行对应导回。
+          </n-text>
+        </div>
 
-      <n-input v-model:value="filename" placeholder="文件名（可选，留空自动命名，无需扩展名）" />
-    </n-space>
+        <template v-if="!isTword">
+          <div v-for="t in selectedTypes" :key="t">
+            <n-text depth="3" style="font-size: 12px">{{ TYPE_LABELS[t] }} · 导出列</n-text>
+            <n-checkbox-group v-model:value="selectedColumns[t]">
+              <n-space>
+                <n-checkbox v-for="opt in COLUMN_OPTIONS[t]" :key="opt.value"
+                            :value="opt.value" :label="opt.label" />
+              </n-space>
+            </n-checkbox-group>
+          </div>
+        </template>
+
+        <div v-if="filterUsable">
+          <n-text depth="3" style="font-size: 12px">范围（仅对{{ TYPE_LABELS[filterScope!.content_type] }}生效）</n-text>
+          <n-radio-group v-model:value="scope">
+            <n-space>
+              <n-radio value="all">全部</n-radio>
+              <n-radio value="filter" :disabled="!filterActive">仅当前筛选结果</n-radio>
+            </n-space>
+          </n-radio-group>
+          <n-text v-if="scope === 'filter'" depth="3" style="display: block; font-size: 12px">
+            {{ filterSummary }}
+          </n-text>
+        </div>
+
+        <n-input v-model:value="filename" placeholder="文件名（可选，留空自动命名，无需扩展名）" />
+      </n-space>
+    </div>
 
     <template #footer>
       <n-space justify="end">

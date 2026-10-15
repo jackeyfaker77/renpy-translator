@@ -20,7 +20,7 @@ class TranslationService:
 
     def __init__(self, translator: AITranslator, db: ProjectDatabase,
                  logger: TranslationLogger, max_concurrent: int = 5,
-                 max_context_k: int = 8, max_tokens: int = 1000,
+                 max_context_k: int = 8, max_tokens: Optional[int] = None,
                  batch_lines: int = 100):
         self.translator = translator
         self.db = db
@@ -37,7 +37,8 @@ class TranslationService:
         self._running = False
         self._executor = ThreadPoolExecutor(max_workers=max_concurrent)
 
-    def set_model_config(self, max_context_k: int, max_tokens: int, batch_lines: int = None):
+    def set_model_config(self, max_context_k: int, max_tokens: Optional[int],
+                         batch_lines: int = None):
         """设置模型配置"""
         self.max_context_k = max_context_k
         self.max_tokens = max_tokens
@@ -87,9 +88,18 @@ class TranslationService:
     _PROFILE_PRIORITY = ['说话风格', '翻译建议', '口癖', '称谓', '语气']
     _PROFILE_FIELD_MAX = 300  # 非优先字段的最大字符数
 
+    def _load_options(self):
+        """读项目翻译模式选项（同步，调用方放 executor）"""
+        from translate_options import parse_options
+        return parse_options(self.db.get_meta('translate_options'))
+
     @classmethod
-    def _format_character_profiles(cls, chars: list, get_profile) -> str:
-        """汇总批内角色特征，按语气相关度排序注入"""
+    def _format_character_profiles(cls, chars: list, get_profile,
+                                   only_keys=None) -> str:
+        """汇总批内角色特征，按语气相关度排序注入
+
+        only_keys 非空时只保留键名含其一的字段（轻量模式只留「翻译建议」）。
+        """
         parts = []
         for c in chars:
             profile = get_profile(c)
@@ -99,12 +109,16 @@ class TranslationService:
             for k, v in profile.items():
                 if not v:
                     continue
+                if only_keys and not any(p in k for p in only_keys):
+                    continue
                 line = f"- {k}：{v}"
                 if any(p in k for p in cls._PROFILE_PRIORITY):
                     priority.append(line)
                 else:
                     rest.append(line[:cls._PROFILE_FIELD_MAX])
             lines = priority + rest
+            if not lines:
+                continue
             parts.append(f"[{c}] 人物特征：\n" + "\n".join(lines))
         return "\n\n".join(parts)
 
@@ -129,7 +143,7 @@ class TranslationService:
             return token_budget.batch_src_token_budget(
                 glossary_tokens=glossary_tokens,
                 profile_tokens=profile_size,
-                declared_max_tokens=self.max_tokens,
+                declared_max_tokens=self.max_tokens or 0,
             )
 
         batches, current, used = [], [], 0
@@ -169,13 +183,19 @@ class TranslationService:
             if cfg:
                 self.max_context_k, self.max_tokens, self.batch_lines = cfg
         def prepare():
-            glossary_tokens = count_tokens(self._get_glossary_text())
-            glossary_tokens += count_tokens(self._get_style_guide())
+            opts = self._load_options()
+            glossary_tokens = 0
+            if opts.glossary:
+                glossary_tokens += count_tokens(self._get_glossary_text())
+            if opts.style_guide:
+                glossary_tokens += count_tokens(self._get_style_guide())
             profiles = {}
-            if content_type == 'dialogue':
+            if content_type == 'dialogue' and opts.character_profile != 'off':
+                only_keys = ('翻译建议',) if opts.character_profile == 'advice_only' else None
                 chars = {it.get('character', '') for it in items if it.get('character')}
                 for char in chars:
-                    text = self._format_character_profiles([char], self.db.get_profile)
+                    text = self._format_character_profiles(
+                        [char], self.db.get_profile, only_keys=only_keys)
                     profiles[char] = count_tokens(text) + 2 if text else 0
             return self.group_into_batches(
                 items, glossary_tokens, profile_tokens_by_character=profiles)
@@ -196,27 +216,38 @@ class TranslationService:
             return {}
         loop = asyncio.get_event_loop()
 
-        # 术语表 + 人名表 + 风格指南（每批一次，不再每句一次）
-        glossary_text = await loop.run_in_executor(None, self._get_glossary_text)
-        style_guide = await loop.run_in_executor(None, self._get_style_guide)
+        # 翻译模式开关：关闭的注入项直接置空，[[?token]] 可选段整段消失
+        opts = await loop.run_in_executor(None, self._load_options)
 
-        # 批内角色特征汇总（仅对话）
+        # 术语表 + 人名表 + 风格指南（每批一次，不再每句一次）
+        glossary_text = ''
+        if opts.glossary:
+            glossary_text = await loop.run_in_executor(None, self._get_glossary_text)
+        style_guide = ''
+        if opts.style_guide:
+            style_guide = await loop.run_in_executor(None, self._get_style_guide)
+
+        # 批内角色特征汇总（仅对话；轻量模式只注入「翻译建议」）
         character_profiles = ""
-        if content_type == 'dialogue':
+        if content_type == 'dialogue' and opts.character_profile != 'off':
             chars = sorted({it.get('character', '') for it in items if it.get('character')})
+            only_keys = ('翻译建议',) if opts.character_profile == 'advice_only' else None
             if chars:
                 character_profiles = await loop.run_in_executor(
-                    None, lambda: self._format_character_profiles(chars, self.db.get_profile)
+                    None, lambda: self._format_character_profiles(
+                        chars, self.db.get_profile, only_keys=only_keys)
                 )
 
         # 前文上下文（取批内首条；批内句子互为上下文，取消后文参考）
-        context_count = min(self._calc_context_count(glossary_text, character_profiles), 8)
-        first_id = items[0]['id']
+        context_before = []
+        if opts.context:
+            context_count = min(self._calc_context_count(glossary_text, character_profiles), 8)
+            first_id = items[0]['id']
 
-        def _get_context():
-            return self.db.get_dialogue_context(first_id, content_type, count=context_count)
+            def _get_context():
+                return self.db.get_dialogue_context(first_id, content_type, count=context_count)
 
-        context_before, _ = await loop.run_in_executor(None, _get_context)
+            context_before, _ = await loop.run_in_executor(None, _get_context)
 
         async with self._semaphore:
             cache_before = (getattr(self.translator, 'cache_hit_total', 0),
@@ -273,7 +304,7 @@ class TranslationService:
                     content_type, it['id'], it.get('translated_text', ''), text)
                 if text:
                     saved[it['id']] = text
-            if terms:
+            if terms and opts.term_extract:
                 for t in terms:
                     t['term_type'] = 'other'
                     t['source'] = 'ai'
@@ -318,31 +349,45 @@ class TranslationService:
         async with self._semaphore:
             loop = asyncio.get_event_loop()
             try:
-                # 获取术语表 + 人名表 + 风格指南
-                glossary_text = await loop.run_in_executor(None, self._get_glossary_text)
-                style_guide = await loop.run_in_executor(None, self._get_style_guide)
+                # 翻译模式开关：关闭的注入项置空（[[?token]] 整段消失）
+                opts = await loop.run_in_executor(None, self._load_options)
 
-                # 获取角色特征（对话翻译时）
+                # 获取术语表 + 人名表 + 风格指南
+                glossary_text = ''
+                if opts.glossary:
+                    glossary_text = await loop.run_in_executor(None, self._get_glossary_text)
+                style_guide = ''
+                if opts.style_guide:
+                    style_guide = await loop.run_in_executor(None, self._get_style_guide)
+
+                # 获取角色特征（对话翻译时；轻量模式只留「翻译建议」）
                 character_profile = ""
-                if character and content_type == 'dialogue':
+                if character and content_type == 'dialogue' and opts.character_profile != 'off':
+                    only_keys = ('翻译建议',) if opts.character_profile == 'advice_only' else None
+
                     def _get_profile():
                         profile = self.db.get_profile(character)
-                        if profile:
-                            lines = [f"- {k}：{v}" for k, v in profile.items() if v]
-                            return f"当前说话角色 [{character}] 的人物特征：\n" + "\n".join(lines)
-                        return ""
+                        if not profile:
+                            return ""
+                        lines = [f"- {k}：{v}" for k, v in profile.items() if v
+                                 and (not only_keys or any(p in k for p in only_keys))]
+                        if not lines:
+                            return ""
+                        return f"当前说话角色 [{character}] 的人物特征：\n" + "\n".join(lines)
                     character_profile = await loop.run_in_executor(None, _get_profile)
 
                 # 动态计算上下文行数
-                context_count = self._calc_context_count(
-                    glossary_text, character_profile
-                )
+                context_before, context_after = [], []
+                if opts.context:
+                    context_count = self._calc_context_count(
+                        glossary_text, character_profile
+                    )
 
-                # 获取 label 上下文
-                def _get_context():
-                    return self.db.get_dialogue_context(item_id, content_type, count=context_count)
+                    # 获取 label 上下文
+                    def _get_context():
+                        return self.db.get_dialogue_context(item_id, content_type, count=context_count)
 
-                context_before, context_after = await loop.run_in_executor(None, _get_context)
+                    context_before, context_after = await loop.run_in_executor(None, _get_context)
 
                 # 翻译
                 result = await loop.run_in_executor(
@@ -375,8 +420,8 @@ class TranslationService:
                             self.db.update_ui_text(item_id, translated)
                         elif content_type == 'dialogue':
                             self.db.update_dialogue(item_id, translated)
-                        # 保存 AI 提取的术语
-                        if terms:
+                        # 保存 AI 提取的术语（term_extract 关闭时丢弃）
+                        if terms and opts.term_extract:
                             for t in terms:
                                 t['term_type'] = 'other'
                                 t['source'] = 'ai'

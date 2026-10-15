@@ -38,6 +38,8 @@ const router = createRouter({
     },
     { path: '/settings', component: () => import('./pages/SettingsPage.vue') },
     { path: '/prompts', component: () => import('./pages/PromptsPage.vue') },
+    { path: '/diagnostics', component: () => import('./pages/DiagnosticsPage.vue') },
+    { path: '/api-logs', redirect: '/diagnostics' },
   ],
 })
 
