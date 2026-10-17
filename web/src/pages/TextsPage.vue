@@ -4,11 +4,12 @@ import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NButton, NCard, NCheckbox, NDataTable, NDropdown, NEmpty, NInput, NModal,
-  NPagination, NPopconfirm, NSelect, NSpace, NSwitch, NText, NTooltip,
-  NInputGroup, useDialog, useMessage,
+  NPagination, NPopconfirm, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch,
+  NTag, NText, NTooltip, useDialog, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, DataTableSortState } from 'naive-ui'
-import { BookOutline, CodeSlashOutline, DownloadOutline, LanguageOutline, LocateOutline, RefreshOutline, ShareOutline, SparklesOutline, WarningOutline } from '@vicons/ionicons5'
+import type { DropdownOption } from 'naive-ui'
+import { DownloadOutline, LanguageOutline, ShareOutline, SparklesOutline, WarningOutline } from '@vicons/ionicons5'
 import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
@@ -53,7 +54,11 @@ const crossImportVisible = ref(false)
 const isDialogue = computed(() => props.contentType === 'dialogue')
 const title = computed(() => (isDialogue.value ? '对话翻译' : '字符串翻译'))
 let loadVersion = 0
-onUnmounted(() => { loadVersion++ })
+onUnmounted(() => {
+  loadVersion++
+  window.removeEventListener('keydown', onGlobalKeydown)
+  window.clearTimeout(searchTimer)
+})
 
 async function load() {
   const version = ++loadVersion
@@ -205,8 +210,9 @@ function resetSelection() {
 }
 
 function searchKeydown(e: KeyboardEvent) {
-  // 确认输入法候选字时不触发搜索和表格刷新。
+  // Enter 即时搜索（防抖 watch 对 IME 组合态的连续触发在这里打断）
   if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return
+  window.clearTimeout(searchTimer)
   query.page = 0
   selectedIds.value = []  // 搜索范围变了，旧选择作废
   void load()
@@ -429,10 +435,114 @@ const roleOptions = computed(() =>
   characters.value.filter((c) => c.value))
 
 const translateMenuOptions = computed(() => [
-  { key: 'all', label: '全部翻译（所有未翻译）' },
+  { key: 'all', label: '翻译全部未翻译' },
   { key: 'filtered', label: `翻译当前筛选（共 ${total.value} 条）`, disabled: total.value === 0 },
   ...(isDialogue.value ? [{ key: 'role', label: '翻译指定角色…' }] : []),
+  { type: 'divider', key: 'd-translate' },
+  { key: 'page', label: `翻译本页（${rows.value.length} 条）` },
+  { key: 'tune', label: '本次翻译设置…' },
 ])
+
+// ---- 导出/导入/更多（L2/L3 收纳） ----
+function onTranslateExtra(key: string) {
+  if (key === 'page') void translatePage()
+  else if (key === 'tune') tuneOpen.value = !tuneOpen.value
+}
+
+const exportMenuOptions = [
+  { key: 'texts', label: '导出译文…' },
+  { key: 'game', label: '去导出游戏' },
+]
+
+function onExportMenu(key: string) {
+  if (key === 'texts') openExport()
+  else void router.push('/export')
+}
+
+const importMenuOptions = [
+  { key: 'texts', label: '导入译文…' },
+  { key: 'project', label: '从其他项目导入…' },
+]
+
+function onImportMenu(key: string) {
+  if (key === 'texts') openImport()
+  else crossImportVisible.value = true
+}
+
+const moreMenuOptions = computed<DropdownOption[]>(() => [
+  ...(isDialogue.value ? [{ key: 'style', label: '风格指南' }] : []),
+  { key: 'replace', label: '查找并替换译文' },
+  { key: 'refresh', label: '刷新' },
+  ...(isDialogue.value ? [] : [
+    { type: 'divider', key: 'd-more' },
+    { key: 'hints', label: '高级：重建上下文' },
+    { key: 'embedded', label: '高级：提取内嵌文本' },
+  ]),
+])
+
+function onMoreMenu(key: string) {
+  if (key === 'style') openStyleGuide()
+  else if (key === 'replace') { replacePreview.value = null; replaceVisible.value = true }
+  else if (key === 'refresh') void load()
+  else if (key === 'hints') void rebuildHints()
+  else if (key === 'embedded') void extractEmbedded()
+}
+
+// ---- 行内「更多」（上下文/清空；选区态下行内动作整体隐藏） ----
+function rowMenu(r: Row): DropdownOption[] {
+  return [
+    { key: 'context', label: '上下文' },
+    ...(r.translated_text ? [{ key: 'clear', label: '清空译文' }] : []),
+  ]
+}
+
+function onRowMenu(key: string, r: Row) {
+  if (key === 'context') {
+    void showContext(r)
+  } else if (key === 'clear') {
+    dialog.warning({
+      title: '清空译文',
+      content: `确定清空「${r.original_text.slice(0, 24)}${r.original_text.length > 24 ? '…' : ''}」的译文？清空后回到未翻译。`,
+      positiveText: '清空',
+      negativeText: '取消',
+      onPositiveClick: () => clearText(r),
+    })
+  }
+}
+
+// ---- 表头勾选旁的下拉：本页全选 / 全选筛选结果 / 清除 ----
+const selMenuOptions: DropdownOption[] = [
+  { key: 'page', label: '本页全选' },
+  { key: 'filtered', label: '全选筛选结果' },
+  { type: 'divider', key: 'd' },
+  { key: 'clear', label: '清除选择' },
+]
+
+function onSelMenu(key: string) {
+  if (key === 'page') togglePage(!pageChecked.value)
+  else if (key === 'filtered') void selectAllFiltered()
+  else resetSelection()
+}
+
+// Esc 清除选区（有弹窗打开时不抢）
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || !selectedIds.value.length) return
+  if (editRow.value || roleModalVisible.value || replaceVisible.value
+    || contextVisible.value || guideVisible.value || failedDialogVisible.value
+    || crossImportVisible.value || importVisible.value || exportVisible.value) return
+  resetSelection()
+}
+
+// 搜索防抖（输入即搜，替代独立搜索按钮）
+let searchTimer: number | undefined
+watch(() => query.search, () => {
+  window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => {
+    query.page = 0
+    resetSelection()
+    void load()
+  }, 300)
+})
 
 function confirmTranslate(title: string, content: string, request: () => Promise<{ job_id: string | null; message?: string }>, emptyMessage: string) {
   if (!ensureModel()) return
@@ -463,6 +573,8 @@ function onTranslateMenu(key: string) {
   } else if (key === 'role') {
     rolePick.value = ''
     roleModalVisible.value = true
+  } else {
+    onTranslateExtra(key)  // page / tune
   }
 }
 
@@ -546,13 +658,17 @@ async function saveGuide() {
 const columns = computed<DataTableColumns<Row>>(() => {
   const cols: DataTableColumns<Row> = [
     {
-      key: '_sel', width: 42, align: 'center',
-      // 表头勾选 = 本页全选；行勾选跨页保持（selectedIds 不随翻页清空）
-      title: () => h(NCheckbox, {
-        checked: pageChecked.value,
-        indeterminate: pageIndeterminate.value,
-        'onUpdate:checked': (v: boolean) => togglePage(v),
-      }),
+      key: '_sel', width: 56, align: 'center',
+      // 表头：勾选=本页全选；旁侧 ▾ 提供「全选筛选结果 / 清除」
+      title: () => h('span', { style: 'display: inline-flex; align-items: center; gap: 2px' }, [
+        h(NCheckbox, {
+          checked: pageChecked.value,
+          indeterminate: pageIndeterminate.value,
+          'onUpdate:checked': (v: boolean) => togglePage(v),
+        }),
+        h(NDropdown, { options: selMenuOptions, onSelect: onSelMenu }, () =>
+          h(NButton, { size: 'tiny', quaternary: true, style: 'padding: 0 2px' }, () => '▾')),
+      ]),
       render: (r) => h(NCheckbox, {
         checked: selectedSet.value.has(r.id),
         'onUpdate:checked': (v: boolean) => toggleRow(r.id, v),
@@ -580,26 +696,21 @@ const columns = computed<DataTableColumns<Row>>(() => {
     },
   })
   cols.push({
-    title: '操作', key: 'actions', width: 185,
-    render: (r) => h(NSpace, { size: 4 }, () => [
-      h(NButton, {
-        size: 'tiny', type: 'primary', quaternary: true,
-        loading: translatingIds.value.has(r.id),
-        disabled: !session.hasTranslator,
-        onClick: () => translateOne(r),
-      }, () => 'AI翻译'),
-      h(NButton, {
-        size: 'tiny', quaternary: true, onClick: () => showContext(r),
-      }, () => '上下文'),
-      ...(r.translated_text ? [h(NPopconfirm, {
-        onPositiveClick: () => clearText(r),
-      }, {
-        trigger: () => h(NButton, {
-          size: 'tiny', type: 'error', quaternary: true,
-        }, () => '清空'),
-        default: () => '确定清空该条译文？清空后可重新翻译。',
-      })] : []),
-    ]),
+    title: '操作', key: 'actions', width: 130,
+    render: (r) => {
+      // 选区态隐藏行内动作（避免与批量操作混淆）
+      if (selectedIds.value.length) return null
+      return h(NSpace, { size: 4 }, () => [
+        h(NButton, {
+          size: 'tiny', type: 'primary', quaternary: true,
+          loading: translatingIds.value.has(r.id),
+          disabled: !session.hasTranslator,
+          onClick: () => translateOne(r),
+        }, () => 'AI翻译'),
+        h(NDropdown, { options: rowMenu(r), onSelect: (k: string) => onRowMenu(k, r) }, () =>
+          h(NButton, { size: 'tiny', quaternary: true }, () => '更多 ▾')),
+      ])
+    },
   })
   return cols
 })
@@ -608,6 +719,7 @@ onMounted(() => {
   load()
   loadCharacters()
   void loadTranslateOptions()
+  window.addEventListener('keydown', onGlobalKeydown)
 })
 
 watch(() => [query.filter_mode, query.character], () => {
@@ -621,33 +733,57 @@ watch(() => [query.filter_mode, query.character], () => {
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px" wrap>
       <page-header :title="title" :help-section="isDialogue ? '5,7' : '4,7'" />
-      <n-tooltip v-if="!session.hasTranslator" trigger="hover">
-        <template #trigger>
-          <n-button size="small" type="warning"
-                    :render-icon="renderIcon(LanguageOutline)"
-                    @click="router.push('/settings?new=1')">
-            全部翻译 ▾
-          </n-button>
-        </template>
-        还没配置模型，点击去配置（翻译质量与成本都由模型决定）
-      </n-tooltip>
-      <n-dropdown v-else :options="translateMenuOptions" @select="onTranslateMenu">
-        <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)">全部翻译 ▾</n-button>
-      </n-dropdown>
-      <n-button size="small" :disabled="!session.hasTranslator"
-                @click="translatePage">翻译本页</n-button>
-      <n-button size="small" @click="replacePreview = null; replaceVisible = true">查找并替换译文</n-button>
-      <n-button size="small" :render-icon="renderIcon(ShareOutline)" @click="openExport">导出</n-button>
-      <n-button size="small" :render-icon="renderIcon(DownloadOutline)" @click="openImport">导入</n-button>
-      <n-button size="small" @click="crossImportVisible = true">从其他项目导入</n-button>
-      <n-button
-        v-if="failedBatchCount > 0" size="small" type="warning"
-        :render-icon="renderIcon(WarningOutline)" @click="failedDialogVisible = true"
-      >失败条目 ({{ failedBatchCount }})</n-button>
-      <n-button v-if="!isDialogue" size="small" :render-icon="renderIcon(LocateOutline)" @click="rebuildHints">重建上下文</n-button>
-      <n-button v-if="!isDialogue" size="small" type="warning" :render-icon="renderIcon(CodeSlashOutline)" @click="extractEmbedded">提取内嵌文本</n-button>
-      <n-button v-if="isDialogue" size="small" :render-icon="renderIcon(BookOutline)" @click="openStyleGuide">风格指南</n-button>
-      <n-button size="small" quaternary :loading="loading" :render-icon="renderIcon(RefreshOutline)" @click="load">刷新</n-button>
+
+      <!-- L4 选区态：整组动作替换为上下文条（Esc 可清除） -->
+      <template v-if="selectedIds.length">
+        <n-text strong style="color: #63e2b7">已选 {{ selectedIds.length }} 条（跨页）</n-text>
+        <n-popconfirm @positive-click="clearSelected">
+          <template #trigger>
+            <n-button size="small" type="warning">清空所选译文</n-button>
+          </template>
+          确认清空所选 {{ selectedIds.length }} 条译文？清空后回到「未翻译」，可重新翻译。
+        </n-popconfirm>
+        <n-button size="small" quaternary @click="resetSelection">取消选择（Esc）</n-button>
+      </template>
+
+      <template v-else>
+        <!-- L1 主操作：开始翻译（带作用域菜单）+ 当前模式 chip -->
+        <n-tooltip v-if="!session.hasTranslator" trigger="hover">
+          <template #trigger>
+            <n-button size="small" type="warning"
+                      :render-icon="renderIcon(LanguageOutline)"
+                      @click="router.push('/settings?new=1')">
+              开始翻译 ▾
+            </n-button>
+          </template>
+          还没配置模型，点击去配置（翻译质量与成本都由模型决定）
+        </n-tooltip>
+        <n-dropdown v-else :options="translateMenuOptions" @select="onTranslateMenu">
+          <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)">开始翻译 ▾</n-button>
+        </n-dropdown>
+        <n-tag size="small" type="info" style="cursor: pointer"
+               title="点击展开本次翻译设置"
+               @click="tuneOpen = !tuneOpen">
+          {{ presetLabels[translatePreset] }}
+        </n-tag>
+
+        <!-- L2 次操作：数据交换与事件 -->
+        <n-dropdown :options="exportMenuOptions" @select="onExportMenu">
+          <n-button size="small" :render-icon="renderIcon(ShareOutline)">导出 ▾</n-button>
+        </n-dropdown>
+        <n-dropdown :options="importMenuOptions" @select="onImportMenu">
+          <n-button size="small" :render-icon="renderIcon(DownloadOutline)">导入 ▾</n-button>
+        </n-dropdown>
+        <n-button
+          v-if="failedBatchCount > 0" size="small" type="warning"
+          :render-icon="renderIcon(WarningOutline)" @click="failedDialogVisible = true"
+        >失败条目 ({{ failedBatchCount }})</n-button>
+
+        <!-- L3 更多：低频/高级 -->
+        <n-dropdown :options="moreMenuOptions" @select="onMoreMenu">
+          <n-button size="small" quaternary>⋯</n-button>
+        </n-dropdown>
+      </template>
     </n-space>
 
     <n-text v-if="isDialogue" depth="3" style="display: block; margin-bottom: 10px; font-size: 12px">
@@ -660,27 +796,25 @@ watch(() => [query.filter_mode, query.character], () => {
       text="建议先「翻译指定角色」或试译 10 条确认效果，再用「全部翻译」批量推进——先花几分钱验证，避免一次性大量消耗。"
     />
 
-    <n-space align="center" style="margin-bottom: 10px" wrap>
-      <n-text depth="3" style="font-size: 12px">翻译模式</n-text>
-      <n-select
-        :value="translatePreset" size="small" style="width: 110px"
-        :options="presetOptions" :disabled="savingOptions"
-        @update:value="applyPreset"
-      />
-      <n-button size="small" quaternary @click="tuneOpen = !tuneOpen">
-        {{ tuneOpen ? '收起微调' : '微调' }}
-      </n-button>
-      <n-text depth="3" style="font-size: 12px">{{ presetHints[translatePreset] }}</n-text>
-    </n-space>
-
+    <!-- 本次翻译设置（L1 菜单/模式 chip 打开；模式选择已并入 L1 菜单底部） -->
     <n-card v-if="tuneOpen" size="small" style="margin-bottom: 10px">
-      <n-space align="center" wrap>
+      <n-space vertical>
         <n-space align="center">
-          <n-text style="font-size: 12px">术语提取</n-text>
-          <n-switch :value="translateFlags.term_extract" size="small"
-                    :disabled="savingOptions"
-                    @update:value="(v: boolean) => setFlag('term_extract', v)" />
+          <n-text style="font-size: 12px">模式</n-text>
+          <n-select
+            :value="translatePreset" size="small" style="width: 110px"
+            :options="presetOptions" :disabled="savingOptions"
+            @update:value="applyPreset"
+          />
+          <n-text depth="3" style="font-size: 12px">{{ presetHints[translatePreset] }}</n-text>
         </n-space>
+        <n-space align="center" wrap>
+          <n-space align="center">
+            <n-text style="font-size: 12px">术语提取</n-text>
+            <n-switch :value="translateFlags.term_extract" size="small"
+                      :disabled="savingOptions"
+                      @update:value="(v: boolean) => setFlag('term_extract', v)" />
+          </n-space>
         <n-space align="center">
           <n-text style="font-size: 12px">术语表注入</n-text>
           <n-switch :value="translateFlags.glossary" size="small"
@@ -707,43 +841,29 @@ watch(() => [query.filter_mode, query.character], () => {
                     :disabled="savingOptions"
                     @update:value="(v: boolean) => setFlag('context', v)" />
         </n-space>
+        </n-space>
       </n-space>
     </n-card>
 
-    <n-space align="center" style="margin-bottom: 10px" wrap>
-      <n-select
-        v-model:value="query.filter_mode" size="small" style="width: 130px"
-        :options="[
-          { label: '全部', value: 'all' },
-          { label: '未翻译', value: 'untranslated' },
-          { label: '已翻译', value: 'translated' },
-        ]"
+    <!-- 筛选行：搜索优先（输入即搜）+ 状态分段 + 计数右对齐 -->
+    <n-space align="center" style="margin-bottom: 10px; gap: 10px" wrap>
+      <n-input
+        v-model:value="query.search" size="small" clearable
+        style="flex: 1; min-width: 220px; max-width: 420px"
+        placeholder="搜索原文/译文（输入即搜）"
+        @keydown="searchKeydown"
       />
+      <n-radio-group v-model:value="query.filter_mode" size="small">
+        <n-radio-button value="all">全部</n-radio-button>
+        <n-radio-button value="untranslated">未翻译</n-radio-button>
+        <n-radio-button value="translated">已翻译</n-radio-button>
+      </n-radio-group>
       <n-select
         v-if="isDialogue"
         v-model:value="query.character" size="small" style="width: 200px"
         :options="characters" placeholder="角色筛选"
       />
-      <n-input-group style="width: 280px">
-        <n-input
-          v-model:value="query.search" size="small" placeholder="搜索原文/译文"
-          @keydown="searchKeydown"
-        />
-        <n-button size="small" @click="query.page = 0; resetSelection(); load()">搜索</n-button>
-      </n-input-group>
-      <n-button size="small" quaternary @click="selectAllFiltered">全选筛选结果</n-button>
-      <n-text depth="3" style="font-size: 12px">共 {{ total }} 条</n-text>
-    </n-space>
-
-    <n-space v-if="selectedIds.length" align="center" style="margin-bottom: 10px">
-      <n-text strong style="color: #63e2b7">已选 {{ selectedIds.length }} 条</n-text>
-      <n-popconfirm @positive-click="clearSelected">
-        <template #trigger>
-          <n-button size="small" type="warning">清空所选译文</n-button>
-        </template>
-        确认清空所选 {{ selectedIds.length }} 条译文？清空后回到「未翻译」，可重新翻译。
-      </n-popconfirm>
-      <n-button size="small" quaternary @click="resetSelection">取消选择</n-button>
+      <n-text depth="3" style="font-size: 12px; margin-left: auto">共 {{ total }} 条</n-text>
     </n-space>
 
     <n-data-table

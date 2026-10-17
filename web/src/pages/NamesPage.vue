@@ -3,11 +3,12 @@
 import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  NButton, NDataTable, NEmpty, NInput, NInputGroup, NModal, NPopconfirm,
-  NSelect, NSpace, NTag, NText, useMessage,
+  NButton, NDataTable, NDropdown, NEmpty, NInput, NInputGroup, NModal,
+  NSelect, NSpace, NTag, NText, useDialog, useMessage,
 } from 'naive-ui'
+import type { DropdownOption } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import { DownloadOutline, LanguageOutline, RefreshOutline, ShareOutline } from '@vicons/ionicons5'
+import { DownloadOutline, LanguageOutline, ShareOutline } from '@vicons/ionicons5'
 import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
@@ -22,6 +23,7 @@ import { useSessionStore } from '../stores/session'
 const message = useMessage()
 const router = useRouter()
 const session = useSessionStore()
+const dialog = useDialog()
 const { runJob } = useJobTask()
 
 interface NameRow {
@@ -187,6 +189,54 @@ async function keepOriginalAll() {
   }
 }
 
+// ---- 工具栏收纳：L1 批量菜单 / L3 更多 / 行内 ⋯ ----
+const batchMenuOptions: DropdownOption[] = [
+  { key: 'both', label: '全部翻译+分析' },
+  { key: 'analyze', label: '全部分析' },
+]
+
+function onBatchMenu(key: string) {
+  void translateAll(key as RunMode)
+}
+
+const moreMenuOptions: DropdownOption[] = [
+  { key: 'keepAll', label: '全部保留原名…' },
+  { type: 'divider', key: 'd' },
+  { key: 'rebuild', label: '重新提取角色' },
+  { key: 'importFrom', label: '从其他项目导入…' },
+  { key: 'refresh', label: '刷新' },
+]
+
+function onMoreMenu(key: string) {
+  if (key === 'keepAll') {
+    dialog.warning({
+      title: '全部保留原名',
+      content: '将所有未翻译角色的中文名设为原名（正文提及也保留原名），可随时单个改回。确定？',
+      positiveText: '保留原名',
+      negativeText: '取消',
+      onPositiveClick: () => keepOriginalAll(),
+    })
+  } else if (key === 'rebuild') void refreshCharacters()
+  else if (key === 'importFrom') crossImportVisible.value = true
+  else if (key === 'refresh') void load()
+}
+
+function rowMenu(r: NameRow): DropdownOption[] {
+  return [
+    { key: 'analyze', label: '仅分析', disabled: !session.hasTranslator },
+    { key: 'rename', label: '重译名', disabled: !r.original || !session.hasTranslator },
+    { key: 'keep', label: '保留原名', disabled: !r.original || r.translated === r.original },
+    { key: 'view', label: '查看画像', disabled: !r.analyzed },
+  ]
+}
+
+function onRowMenu(key: string, r: NameRow) {
+  if (key === 'analyze') void runOne(r, 'analyze')
+  else if (key === 'rename') void runOne(r, 'name')
+  else if (key === 'keep') void keepOriginal(r)
+  else if (key === 'view') void viewProfile(r)
+}
+
 // 重新提取角色：修复引号说话人（"Ricardo" "..." 匿名角色）历史上
 // 被误判为泛指变量、display_name 缺失显示「无需翻译」的存量数据
 const refreshLoading = ref(false)
@@ -274,7 +324,7 @@ const columns: DataTableColumns<NameRow> = [
     }, () => processing.value.has(rowKey(r)) ? '处理中' : r.analyzed ? '已完成' : '未分析'),
   },
   {
-    title: '操作', key: 'actions', width: 360,
+    title: '操作', key: 'actions', width: 190,
     render: (r) => h(NSpace, { size: 4 }, () => [
       // 主操作：译名+画像一次出（名字带台词上下文，质量高于单独盲译）
       h(NButton, {
@@ -283,30 +333,9 @@ const columns: DataTableColumns<NameRow> = [
         loading: processing.value.has(rowKey(r)),
         onClick: () => runOne(r, 'both'),
       }, () => '翻译+分析'),
-      // 仅分析：保留原名玩家/人工定名后补画像（不动人名）
-      h(NButton, {
-        size: 'tiny', quaternary: true,
-        disabled: !session.hasTranslator,
-        loading: processing.value.has(rowKey(r)),
-        onClick: () => runOne(r, 'analyze'),
-      }, () => '仅分析'),
-      // 重译名：画像已好只换名字（不重跑分析）
-      h(NButton, {
-        size: 'tiny', quaternary: true,
-        disabled: !r.original || !session.hasTranslator,
-        loading: processing.value.has(rowKey(r)),
-        onClick: () => runOne(r, 'name'),
-      }, () => '重译名'),
-      // 保留原名：不想翻译人名时使用，正文提及也保留原名
-      h(NButton, {
-        size: 'tiny', quaternary: true,
-        disabled: !r.original || r.translated === r.original,
-        onClick: () => keepOriginal(r),
-      }, () => '保留原名'),
-      h(NButton, {
-        size: 'tiny', quaternary: true, disabled: !r.analyzed,
-        onClick: () => viewProfile(r),
-      }, () => '查看'),
+      // 其余四个动作收进「⋯」（频率低，且多数字对模型门禁敏感）
+      h(NDropdown, { options: rowMenu(r), onSelect: (k: string) => onRowMenu(k, r) }, () =>
+        h(NButton, { size: 'tiny', quaternary: true }, () => '更多 ▾')),
     ]),
   },
 ]
@@ -316,25 +345,19 @@ onMounted(load)
 
 <template>
   <div>
-    <n-space align="center" style="width: 100%; margin-bottom: 12px">
+    <n-space align="center" style="width: 100%; margin-bottom: 12px" wrap>
       <page-header title="人名与角色" help-section="3,7" />
-      <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)"
-                :disabled="!session.hasTranslator" @click="translateAll('both')">
-        全部翻译+分析
-      </n-button>
-      <n-button size="small" :disabled="!session.hasTranslator"
-                @click="translateAll('analyze')">全部分析</n-button>
-      <n-popconfirm @positive-click="keepOriginalAll">
-        <template #trigger>
-          <n-button size="small" quaternary :loading="keepAllLoading">全部保留原名</n-button>
-        </template>
-        将所有未翻译角色的中文名设为原名（正文提及也保留原名），可随时单个改回。
-      </n-popconfirm>
-      <n-button size="small" quaternary :loading="refreshLoading" @click="refreshCharacters">重新提取角色</n-button>
+      <!-- L1 主操作 -->
+      <n-dropdown :options="batchMenuOptions" @select="onBatchMenu">
+        <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)">全部翻译+分析 ▾</n-button>
+      </n-dropdown>
+      <!-- L2 次操作 -->
       <n-button size="small" :render-icon="renderIcon(ShareOutline)" @click="exportVisible = true">导出</n-button>
       <n-button size="small" :render-icon="renderIcon(DownloadOutline)" @click="importVisible = true">导入</n-button>
-      <n-button size="small" @click="crossImportVisible = true">从其他项目导入</n-button>
-      <n-button size="small" quaternary :render-icon="renderIcon(RefreshOutline)" @click="load">刷新</n-button>
+      <!-- L3 更多 -->
+      <n-dropdown :options="moreMenuOptions" @select="onMoreMenu">
+        <n-button size="small" quaternary>⋯</n-button>
+      </n-dropdown>
       <n-text depth="3" style="font-size: 12px">
         {{ stats.total }} 人名，翻译 {{ stats.translated }}，分析 {{ stats.analyzed }}
       </n-text>
