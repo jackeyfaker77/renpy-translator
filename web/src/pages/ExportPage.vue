@@ -7,7 +7,7 @@ import { api, toastError } from '../api/client'
 import { renderIcon } from '../components/icons'
 import MarkupIssuesDialog from '../components/MarkupIssuesDialog.vue'
 import ProgressLine from '../components/ProgressLine.vue'
-import PageHelp from '../components/PageHelp.vue'
+import PageHeader from '../components/PageHeader.vue'
 import { useJobsStore } from '../stores/jobs'
 import { useSessionStore } from '../stores/session'
 
@@ -76,8 +76,7 @@ onMounted(load)
 <template>
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px">
-      <h2 style="margin: 0">导出游戏</h2>
-      <page-help style="margin-left: auto" :section="'10'" />
+      <page-header title="导出游戏" help-section="10" />
       <n-popconfirm v-if="untranslated > 0" @positive-click="startExport">
         <template #trigger>
           <n-button size="small" type="primary" :render-icon="renderIcon(PlayOutline)">开始导出</n-button>

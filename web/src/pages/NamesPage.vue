@@ -12,7 +12,7 @@ import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
 import ImportFromProjectDialog from '../components/ImportFromProjectDialog.vue'
 import ImportTextsDialog from '../components/ImportTextsDialog.vue'
-import PageHelp from '../components/PageHelp.vue'
+import PageHeader from '../components/PageHeader.vue'
 import { useInlineEdit } from '../composables/useInlineEdit'
 import { useJobTask } from '../composables/useJobTask'
 import { useSessionStore } from '../stores/session'
@@ -304,8 +304,7 @@ onMounted(load)
 <template>
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px">
-      <h2 style="margin: 0">人名翻译</h2>
-      <page-help style="margin-left: auto" :section="'3,7'" />
+      <page-header title="人名与角色" help-section="3,7" />
       <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)" @click="translateAll('both')">
         全部翻译+分析
       </n-button>

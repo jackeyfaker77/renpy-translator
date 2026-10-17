@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NCard, NEmpty, NForm, NFormItem, NInput, NInputGroup, NInputNumber,
   NModal, NPopconfirm, NSelect, NSpace, NSpin, NTag, NText, useMessage,
@@ -13,6 +14,8 @@ import { useJobTask } from '../composables/useJobTask'
 import { useSessionStore } from '../stores/session'
 
 const message = useMessage()
+const route = useRoute()
+const router = useRouter()
 const session = useSessionStore()
 const { runJob } = useJobTask()
 
@@ -107,6 +110,13 @@ function openCreate() {
   formEditing.value = ''
   formVisible.value = true
 }
+
+// ?new=1：从「未配置模型」提示/首启卡直达新建配置弹窗
+watch(() => route.query.new, (v) => {
+  if (v === undefined) return
+  openCreate()
+  void router.replace({ query: {} })
+}, { immediate: true })
 
 async function openEdit(c: ModelConfig) {
   Object.assign(form, c)

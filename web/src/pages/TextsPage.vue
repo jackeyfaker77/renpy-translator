@@ -14,7 +14,7 @@ import ExportTextsDialog from '../components/ExportTextsDialog.vue'
 import FailedBatchesDialog from '../components/FailedBatchesDialog.vue'
 import ImportFromProjectDialog from '../components/ImportFromProjectDialog.vue'
 import ImportTextsDialog from '../components/ImportTextsDialog.vue'
-import PageHelp from '../components/PageHelp.vue'
+import PageHeader from '../components/PageHeader.vue'
 import { useJobTask } from '../composables/useJobTask'
 import { useSessionStore } from '../stores/session'
 
@@ -605,8 +605,7 @@ watch(() => [query.filter_mode, query.character], () => {
 <template>
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px" wrap>
-      <h2 style="margin: 0">{{ title }}</h2>
-      <page-help style="margin-left: auto" :section="isDialogue ? '5,7' : '4,7'" />
+      <page-header :title="title" :help-section="isDialogue ? '5,7' : '4,7'" />
       <n-dropdown :options="translateMenuOptions" @select="onTranslateMenu">
         <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)">全部翻译 ▾</n-button>
       </n-dropdown>

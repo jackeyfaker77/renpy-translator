@@ -4,7 +4,8 @@ import { useSessionStore } from './stores/session'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/projects' },
+    { path: '/', redirect: '/overview' },
+    { path: '/overview', component: () => import('./pages/OverviewPage.vue') },
     { path: '/projects', component: () => import('./pages/ProjectsPage.vue') },
     {
       path: '/names', component: () => import('./pages/NamesPage.vue'),
@@ -43,9 +44,13 @@ const router = createRouter({
   ],
 })
 
-// 无打开项目时，项目相关页面跳回项目管理
+// 无打开项目时，项目相关页面跳回项目管理；
+// 「/」按有无项目分流：有项目 → 概览（下一步落点），无项目 → 项目库（首页）
 router.beforeEach((to) => {
   const session = useSessionStore()
+  if (to.path === '/' ) {
+    return session.currentProject ? '/overview' : '/projects'
+  }
   if (to.meta.needsProject && session.loaded && !session.currentProject) {
     return '/projects'
   }

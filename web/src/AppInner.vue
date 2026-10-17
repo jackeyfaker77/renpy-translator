@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /** 应用主体（在 message/dialog provider 内，可用 useMessage） */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NLayout, NLayoutHeader, NLayoutSider, NLayoutContent, NMenu, NModal, NSelect,
-  NSwitch, NTag, NButton, NDropdown, NSpace, NText, NTooltip, useMessage,
+  NLayout, NLayoutHeader, NLayoutSider, NLayoutContent, NMenu, NModal,
+  NSwitch, NTag, NButton, NDropdown, NEllipsis, NSpace, NText, useMessage,
 } from 'naive-ui'
-import type { MenuOption } from 'naive-ui'
+import type { DropdownOption, MenuOption } from 'naive-ui'
 import { useSessionStore } from './stores/session'
 import { useProjectsStore } from './stores/projects'
 import { useJobsStore, type JobView } from './stores/jobs'
@@ -25,24 +25,104 @@ const uploadsStore = useUploadsStore()
 const route = useRoute()
 const router = useRouter()
 
-const menuOptions: MenuOption[] = [
-  { label: '项目管理', key: '/projects' },
-  { label: '人名翻译', key: '/names' },
-  { label: '字符串翻译', key: '/strings' },
-  { label: '对话翻译', key: '/dialogue' },
-  { label: '术语表', key: '/glossary' },
-  { label: '剧情分支图·实验', key: '/story-graph' },
-  { label: '人物关系图谱·实验', key: '/relations' },
-  { label: '导出游戏', key: '/export' },
-  { label: '提示词设置', key: '/prompts' },
-  { label: '模型配置', key: '/settings' },
-  { label: '诊断', key: '/diagnostics' },
-]
+/** 侧栏三段式分组：流程 / 分析 / 设置；无项目时流程组退化为单个「项目库」入口 */
+const menuOptions = computed<MenuOption[]>(() => {
+  const hasProject = !!session.currentProject
+  const flowChildren: MenuOption[] = hasProject
+    ? [
+        { label: '概览', key: '/overview' },
+        { label: '人名与角色', key: '/names' },
+        { label: 'UI 字符串', key: '/strings' },
+        { label: '对话', key: '/dialogue' },
+        { label: '术语表', key: '/glossary' },
+        { label: '导出游戏', key: '/export' },
+      ]
+    : [{ label: '项目库', key: '/projects' }]
+  const groups: MenuOption[] = [
+    { type: 'group', key: 'g-flow', label: '流程', children: flowChildren },
+  ]
+  if (hasProject) {
+    groups.push({
+      type: 'group', key: 'g-analysis', label: '分析', children: [
+        { label: '剧情分支图', key: '/story-graph', extra: '实验' },
+        { label: '人物关系图谱', key: '/relations', extra: '实验' },
+      ],
+    })
+  }
+  groups.push({
+    type: 'group', key: 'g-settings', label: '设置', children: [
+      {
+        label: '模型配置', key: '/settings',
+        // 未配置 = 红点提示（可点击性由主操作禁用+本页入口承担）
+        extra: session.hasTranslator ? undefined
+          : () => h(NTag, { size: 'tiny', type: 'warning' }, () => '未配置'),
+      },
+      { label: '提示词设置', key: '/prompts' },
+      { label: '诊断', key: '/diagnostics' },
+    ],
+  })
+  return groups
+})
 
 const activeKey = computed(() => route.path)
 
-const projectOptions = computed(() =>
-  projectsStore.list.map((p) => ({ label: p.name, value: p.name })))
+// ---- 顶栏帮助/关于菜单（检查更新等低频维护收进这里） ----
+const aboutVisible = ref(false)
+const appVersion = ref('')
+const helpMenuOptions: DropdownOption[] = [
+  { label: '检查更新', key: 'check-update' },
+  { label: '关于', key: 'about' },
+]
+
+function onHelpMenuSelect(key: string) {
+  if (key === 'check-update') checkUpdate(false)
+  else if (key === 'about') aboutVisible.value = true
+}
+
+// ---- 顶栏项目上下文菜单（切换/新建/导入/管理/关闭） ----
+const projectMenuOptions = computed<DropdownOption[]>(() => [
+  {
+    label: '切换项目', key: 'switch', disabled: !projectsStore.list.length,
+    children: projectsStore.list.map((p) => ({
+      label: p.name === session.currentProject ? `${p.name}（当前）` : p.name,
+      key: 'open:' + p.name,
+      disabled: p.name === session.currentProject,
+    })),
+  },
+  { type: 'divider', key: 'd-proj' },
+  { label: '新建项目…', key: 'new' },
+  { label: '导入项目…', key: 'import' },
+  { label: '管理项目', key: 'manage' },
+  ...(session.currentProject
+    ? [{ type: 'divider' as const, key: 'd-close' },
+       { label: '关闭项目', key: 'close' }]
+    : []),
+])
+
+async function onProjectMenuSelect(key: string) {
+  if (key === 'new' || key === 'import' || key === 'manage') {
+    if (route.path !== '/projects') {
+      await router.push({ path: '/projects', query: key === 'manage' ? {} : { dialog: key } })
+    } else if (key !== 'manage') {
+      // 已在项目库页：直接用 query 触发（watch 依赖 query 变化）
+      await router.replace({ path: '/projects', query: { dialog: key } })
+    }
+    return
+  }
+  if (key === 'close') {
+    try {
+      await session.close()
+      await projectsStore.refresh()
+      await router.push('/projects')
+    } catch (e) {
+      toastError(message, e)
+    }
+    return
+  }
+  if (key.startsWith('open:')) {
+    await onProjectChange(key.slice(5))
+  }
+}
 
 /** 打开对话框的任务（含刷新后恢复的） */
 const dialogJobs = computed(() =>
@@ -171,6 +251,11 @@ async function heartbeat() {
     if (!resp.ok) throw new Error(String(resp.status))
     heartbeatFails = 0
     serverDown.value = false
+    // 顺带取版本号（关于菜单展示）
+    try {
+      const data = await resp.json()
+      if (typeof data.version === 'string') appVersion.value = data.version
+    } catch { /* 版本号拿不到不影响心跳 */ }
   } catch {
     heartbeatFails++
     if (heartbeatFails >= 2) serverDown.value = true
@@ -246,36 +331,27 @@ onUnmounted(() => {
 
 <template>
   <n-layout style="height: 100vh">
-    <n-layout-header bordered style="padding: 0 16px; height: 52px; display: flex; align-items: center; gap: 16px">
+    <n-layout-header bordered style="padding: 0 16px; height: 52px; display: flex; align-items: center; gap: 12px">
       <span style="font-size: 16px; font-weight: 600">Ren'Py 翻译工具</span>
-      <n-select
-        style="width: 260px"
-        size="small"
-        placeholder="选择项目"
-        :value="session.currentProject || null"
-        :options="projectOptions"
-        @update:value="onProjectChange"
-      />
-      <n-tag v-if="session.currentProject" size="small" type="success">
-        {{ session.progressText }}
+      <!-- 项目上下文：名称 + 进度，点开切换/新建/导入/管理/关闭 -->
+      <n-dropdown trigger="click" :options="projectMenuOptions" @select="onProjectMenuSelect">
+        <n-button size="small" quaternary style="max-width: 460px">
+          <n-ellipsis style="max-width: 170px">
+            {{ session.currentProject || '选择项目' }}
+          </n-ellipsis>
+          <n-text v-if="session.progressText" depth="3"
+                  style="font-size: 12px; margin-left: 8px">
+            <n-ellipsis style="max-width: 240px">{{ session.progressText }}</n-ellipsis>
+          </n-text>
+          <span v-else style="font-size: 12px; margin-left: 8px; opacity: 0.6">▾</span>
+        </n-button>
+      </n-dropdown>
+      <n-tag v-if="session.currentProject && !session.hasTranslator" size="small" type="warning"
+             style="cursor: pointer" @click="router.push('/settings?new=1')">
+        未配置模型 · 去配置
       </n-tag>
-      <n-tag v-if="session.currentProject && !session.hasTranslator" size="small" type="warning">
-        未配置模型
-      </n-tag>
-      <!-- 检查更新（GitHub Release）：开关控制启动时自动检查 -->
-      <n-button size="tiny" quaternary type="info" :loading="checkingUpdate"
-                @click="checkUpdate(false)">
-        检查更新
-      </n-button>
-      <n-tooltip trigger="hover">
-        <template #trigger>
-          <n-switch size="small" :value="autoUpdateCheck"
-                    @update:value="onAutoCheckChange" />
-        </template>
-        启动时自动检查更新（有新版本才弹窗，失败静默）
-      </n-tooltip>
-      <!-- 后台任务列表：进度对话框被关闭后任务仍在跑，点列表项重开对应对话框 -->
       <span style="flex: 1" />
+      <!-- 后台任务列表：进度对话框被关闭后任务仍在跑，点列表项重开对应对话框 -->
       <n-dropdown
         v-if="backgroundJobs.length || backgroundUploads.length"
         trigger="click" placement="bottom-end"
@@ -285,6 +361,11 @@ onUnmounted(() => {
         <n-button size="tiny" quaternary type="info">
           ⏳ 后台任务 {{ backgroundJobs.length + backgroundUploads.length }}
         </n-button>
+      </n-dropdown>
+      <!-- 帮助/关于：低频维护不再占黄金位 -->
+      <n-dropdown trigger="click" placement="bottom-end"
+                  :options="helpMenuOptions" @select="onHelpMenuSelect">
+        <n-button size="tiny" quaternary>?</n-button>
       </n-dropdown>
     </n-layout-header>
     <n-layout has-sider position="absolute" style="top: 52px">
@@ -347,6 +428,27 @@ onUnmounted(() => {
         <n-button type="primary" @click="gotoDownload">前往下载</n-button>
       </n-space>
     </template>
+  </n-modal>
+
+  <!-- 关于（版本 + 自动检查开关 + 手动检查入口） -->
+  <n-modal v-model:show="aboutVisible" preset="card" title="关于" style="width: min(420px, 96vw)">
+    <n-space vertical size="medium">
+      <n-text>
+        Ren'Py 翻译工具
+        <n-text v-if="appVersion" depth="3">v{{ appVersion }}</n-text>
+      </n-text>
+      <n-text depth="3" style="font-size: 12px">
+        AI 翻译 + 手动校对的 Ren'Py 视觉小说汉化工具。
+      </n-text>
+      <n-space align="center">
+        <n-text depth="3" style="font-size: 12px">启动时自动检查更新</n-text>
+        <n-switch size="small" :value="autoUpdateCheck"
+                  @update:value="onAutoCheckChange" />
+      </n-space>
+      <n-button size="small" :loading="checkingUpdate" @click="checkUpdate(false)">
+        立即检查更新
+      </n-button>
+    </n-space>
   </n-modal>
 
   <!-- 全局上传进度对话框（zip 传输阶段；顶栏任务列表点开） -->
