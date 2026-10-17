@@ -21,4 +21,6 @@ export const t = {
   warningBg: 'rgba(242,201,125,0.12)',  // 警告底（如上下文高亮）
   errorBg: 'rgba(232,128,128,0.12)',    // 错误底
   focus: 'rgba(99,226,183,0.45)',       // 键盘焦点环
+  mark: '#ffca28',              // 行内标记高亮（diff/mark 底色）
+  markFg: '#000',               // 标记上的文字色
 } as const

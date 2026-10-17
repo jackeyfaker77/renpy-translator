@@ -165,7 +165,8 @@ const columns = computed<DataTableColumns<Row>>(() => [
         })
       }
       return h('span', {
-        style: `cursor: text; display: block; min-height: 20px; ${r.cn_term ? '' : 'color: #666'}`,
+        class: r.cn_term ? undefined : 'rt-t3',
+        style: 'cursor: text; display: block; min-height: 20px',
         onClick: () => startEdit(r),
       }, r.cn_term || '（点击输入译文）')
     },

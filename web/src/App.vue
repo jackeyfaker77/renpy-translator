@@ -2,6 +2,16 @@
 import { NConfigProvider, NGlobalStyle, NMessageProvider, NDialogProvider, darkTheme, zhCN, dateZhCN } from 'naive-ui'
 import AppInner from './AppInner.vue'
 import { overrides } from './theme/overrides'
+import { t } from './theme/tokens'
+
+/** 把 token 注入为 CSS 变量（--rt-<name>）：样式块/内联样式的唯一色值来源。
+ *  故意不写字面量进 CSS——hex 只允许存在于 theme/tokens.ts（清扫验收依据）。 */
+const cssVars = Object.entries(t)
+  .map(([k, v]) => `--rt-${k}:${v}`)
+  .join(';')
+const styleEl = document.createElement('style')
+styleEl.textContent = `:root{${cssVars}}`
+document.head.appendChild(styleEl)
 </script>
 
 <template>
@@ -45,6 +55,19 @@ import { overrides } from './theme/overrides'
   outline: 2px solid rgba(99, 226, 183, 0.45);
   outline-offset: 1px;
 }
+
+/* 语义工具类：内联 color 的统一替代（清扫验收的一部分）。
+   命名与 tokens.ts 对应；新增语义先加 token 再加类，不写裸色值。 */
+.rt-t1 { color: var(--rt-text1); }
+.rt-t2 { color: var(--rt-text2); }
+.rt-t3 { color: var(--rt-text3); }
+.rt-primary { color: var(--rt-primary); }
+.rt-warning { color: var(--rt-warning); }
+.rt-error { color: var(--rt-error); }
+.rt-info { color: var(--rt-info); }
+.rt-markfg { color: var(--rt-markFg); }
+.rt-fs12 { font-size: 12px; }
+.rt-fs13 { font-size: 13px; }
 
 /* 模态框长列表统一约定：
    - n-modal 一律 width: min(Xpx, 96vw)，窄窗不横向溢出；

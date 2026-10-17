@@ -38,18 +38,18 @@ function segments(text: string, isTarget: boolean): Array<{ text: string; mark: 
 </script>
 
 <template>
-  <div style="margin: 6px 0 6px 24px; background: #141414; border-radius: 6px; padding: 8px; font-family: monospace; font-size: 12px">
+  <div style="margin: 6px 0 6px 24px; background: var(--rt-surface0); border-radius: 6px; padding: 8px; font-family: monospace; font-size: 12px">
     <n-spin v-if="loading" size="small" />
-    <div v-else-if="error" style="color: #e88080">{{ error }}</div>
+    <div v-else-if="error" class="rt-error">{{ error }}</div>
     <div v-else>
       <div
         v-for="l in lines" :key="l.no"
-        :style="l.is_target ? 'background: #4a4420; padding: 0 4px' : 'padding: 0 4px; color: #999'"
+        :class="l.is_target ? '' : 'rt-t3'" :style="l.is_target ? 'background: var(--rt-warningBg); padding: 0 4px' : 'padding: 0 4px'"
       >
-        <span style="color: #555; margin-right: 8px">{{ l.no }}</span>
+        <span class="rt-t3" style="margin-right: 8px">{{ l.no }}</span>
         <span
           v-for="(seg, i) in segments(l.text, l.is_target)" :key="i"
-          :style="seg.mark ? 'background: #ffca28; color: #000; border-radius: 2px' : ''"
+          :class="seg.mark ? 'rt-markfg' : ''" :style="seg.mark ? 'background: var(--rt-mark); border-radius: 2px' : ''"
         >{{ seg.text }}</span>
       </div>
     </div>

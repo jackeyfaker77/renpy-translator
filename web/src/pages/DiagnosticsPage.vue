@@ -132,7 +132,7 @@ function barStyle(e: ApiLogEntry) {
   return {
     left: `${Math.min(left, 99.4)}%`,
     width: `${width}%`,
-    background: e.ok ? '#63e2b7' : '#f2c97d',
+    background: e.ok ? 'var(--rt-primary)' : 'var(--rt-warning)',
   }
 }
 
@@ -331,7 +331,7 @@ onUnmounted(() => {
   position: relative;
   height: 34px;
   margin-bottom: 12px;
-  border: 1px solid var(--n-border-color, #333);
+  border: 1px solid var(--n-border-color, var(--rt-border));
   border-radius: 6px;
   overflow: hidden;
 }
@@ -346,7 +346,7 @@ onUnmounted(() => {
 }
 .bar.active {
   opacity: 1;
-  outline: 2px solid #fff;
+  outline: 2px solid var(--rt-text1);
 }
 .main {
   display: flex;
@@ -356,7 +356,7 @@ onUnmounted(() => {
 .ledger {
   flex: 1.2;
   min-width: 0;
-  border: 1px solid var(--n-border-color, #333);
+  border: 1px solid var(--n-border-color, var(--rt-border));
   border-radius: 6px;
   overflow: hidden;
 }
@@ -367,7 +367,7 @@ onUnmounted(() => {
   padding: 4px 8px;
   font-size: 12px;
   cursor: pointer;
-  border-bottom: 1px solid var(--n-border-color, #2a2a2a);
+  border-bottom: 1px solid var(--rt-border);
 }
 .row.head {
   cursor: default;
@@ -395,7 +395,7 @@ onUnmounted(() => {
 .inspector {
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--n-border-color, #333);
+  border: 1px solid var(--n-border-color, var(--rt-border));
   border-radius: 6px;
   padding: 10px;
   max-height: 72vh;

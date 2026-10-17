@@ -85,7 +85,7 @@ const help = computed(() => {
 .help-body :deep(blockquote) {
   margin: 8px 0;
   padding: 6px 12px;
-  border-left: 3px solid #e6a23c;
+  border-left: 3px solid var(--rt-warning);
   background: rgba(230, 162, 60, 0.1);
   border-radius: 4px;
   font-size: 13px;

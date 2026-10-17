@@ -203,7 +203,7 @@ function truncate(s: string, n: number): string {
 </script>
 
 <template>
-  <div style="border-top: 1px solid #333; padding-top: 10px">
+  <div style="border-top: 1px solid var(--rt-border); padding-top: 10px">
     <n-space align="center" style="margin-bottom: 8px" wrap>
       <span style="font-weight: 600">内嵌文本复核（{{ rows.length }} 条候选）</span>
       <n-tag size="small">已选 {{ chosenCount }}/{{ rows.length }}</n-tag>
@@ -220,11 +220,11 @@ function truncate(s: string, n: number): string {
       <n-select v-model:value="sourceFilter" size="tiny" :options="sourceOptions" style="width: 110px" />
       <n-select v-model:value="kindFilter" size="tiny" :options="kindOptions" style="width: 110px" />
       <n-select v-model:value="dangerFilter" size="tiny" :options="dangerOptions" style="width: 110px" />
-      <span v-if="filteredRows.length !== rows.length" style="font-size: 12px; color: #888">
+      <span v-if="filteredRows.length !== rows.length" class="rt-fs12 rt-t3">
         筛出 {{ filteredRows.length }} 条
       </span>
     </n-space>
-    <div style="font-size: 12px; color: #e8a33d; margin-bottom: 8px">
+    <div class="rt-fs12 rt-warning" style="margin-bottom: 8px">
       ✓/✗ 为级联判定结论（规则=静态分析确定，AI=模型多票判定），已判定的条目默认冻结不再重筛；
       ⚠ 表示该字符串另有比较/键名/资源用途。「复核灰区」只针对判定与证据冲突的条目做锚定纠错。最终以你的勾选为准。<br>
       「表」= 写入翻译表（不改源码，逻辑比较仍用原文）；「包」= 源码包 _()（拼接/格式化用途只能这样）；「模板」= f-string 改写为静态模板（导出时替换）。
@@ -232,7 +232,7 @@ function truncate(s: string, n: number): string {
     </div>
 
     <div class="modal-scroll">
-      <div v-for="r in pagedRows" :key="r.id" style="padding: 3px 0; border-bottom: 1px solid #262626">
+      <div v-for="r in pagedRows" :key="r.id" style="padding: 3px 0; border-bottom: 1px solid var(--rt-border)">
         <n-space align="center" :wrap="false" size="small">
           <n-checkbox
             :checked="chosen.has(r.id)" size="small"
@@ -240,7 +240,7 @@ function truncate(s: string, n: number): string {
           />
           <span style="flex: 1; font-size: 13px; word-break: break-all">
             {{ truncate(r.text, 80) }}
-            <span style="color: #888; font-size: 12px">〔{{ r.hint }} · {{ r.file }}:{{ r.line }}〕</span>
+            <span class="rt-t3 rt-fs12">〔{{ r.hint }} · {{ r.file }}:{{ r.line }}〕</span>
           </span>
           <n-tag
             v-if="r.ai_danger" size="tiny" type="warning" :bordered="false"
@@ -271,13 +271,13 @@ function truncate(s: string, n: number): string {
         </n-space>
         <div
           v-if="reasonFor === r.id && (r.ai_reason || r.ai_danger)"
-          style="font-size: 12px; color: #999; margin: 2px 0 2px 24px; word-break: break-all; max-height: 120px; overflow-y: auto"
+          class="rt-t3" style="font-size: 12px; margin: 2px 0 2px 24px; word-break: break-all; max-height: 120px; overflow-y: auto"
         >
-          <span v-if="r.ai_danger" style="color: #e8a33d">
+          <span v-if="r.ai_danger" class="rt-warning">
             ⚠ 静态分析发现该字符串另有比较/键名/资源等非显示用途，翻译后这些用途可能失效。
           </span>
           {{ r.ai_reason }}
-          <span v-if="r.ai_evidence" style="color: #6a9fd8">
+          <span v-if="r.ai_evidence" class="rt-info">
             <br>证据：{{ r.ai_evidence }}
           </span>
         </div>

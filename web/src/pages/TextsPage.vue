@@ -690,7 +690,8 @@ const columns = computed<DataTableColumns<Row>>(() => {
     title: '译文（点击编辑）', key: 'translated_text',
     render: (r) => {
       return h('span', {
-        style: `cursor: text; display: block; min-height: 20px; white-space: pre-wrap; ${r.translated_text ? '' : 'color: #666'}`,
+        class: r.translated_text ? undefined : 'rt-t3',
+        style: 'cursor: text; display: block; min-height: 20px; white-space: pre-wrap',
         onClick: () => startEdit(r),
       }, r.translated_text || '（点击输入译文）')
     },
@@ -736,7 +737,7 @@ watch(() => [query.filter_mode, query.character], () => {
 
       <!-- L4 选区态：整组动作替换为上下文条（Esc 可清除） -->
       <template v-if="selectedIds.length">
-        <n-text strong style="color: #63e2b7">已选 {{ selectedIds.length }} 条（跨页）</n-text>
+        <n-text strong class="rt-primary">已选 {{ selectedIds.length }} 条（跨页）</n-text>
         <n-popconfirm @positive-click="clearSelected">
           <template #trigger>
             <n-button size="small" type="warning">清空所选译文</n-button>
@@ -929,7 +930,7 @@ watch(() => [query.filter_mode, query.character], () => {
         <n-text v-if="replacePreview">匹配 {{ replacePreview.count }} 条译文，共 {{ replacePreview.occurrences }} 处。下方预览前 30 条，请检查人名、变量和标签是否会被误改。</n-text>
         <div v-if="replacePreview" class="modal-scroll">
           <div v-for="sample in replacePreview.samples" :key="sample.id"
-               style="padding: 10px 0; border-bottom: 1px solid #555; white-space: pre-wrap; overflow-wrap: anywhere">
+               style="padding: 10px 0; border-bottom: 1px solid var(--rt-border); white-space: pre-wrap; overflow-wrap: anywhere">
             <div>#{{ sample.id }} · {{ sample.original_text }}</div>
             <div>替换前：{{ sample.before }}</div>
             <div>替换后：{{ sample.after }}</div>
@@ -949,16 +950,16 @@ watch(() => [query.filter_mode, query.character], () => {
     <!-- 上下文对话框 -->
     <n-modal v-model:show="contextVisible" preset="card" title="上下文" style="width: min(640px, 96vw)">
       <div v-if="contextTarget" style="font-size: 13px">
-        <div v-for="r in contextRows.before" :key="'b' + r.id" style="color: #888; padding: 2px 0">
+        <div v-for="r in contextRows.before" :key="'b' + r.id" class="rt-t3" style="padding: 2px 0">
           {{ r.character || '旁白' }}: {{ r.original_text }}
-          <span v-if="r.translated_text" style="color: #6a6">→ {{ r.translated_text }}</span>
+          <span v-if="r.translated_text" class="rt-primary">→ {{ r.translated_text }}</span>
         </div>
-        <div style="background: #4a4420; padding: 4px 6px; border-radius: 4px; margin: 4px 0">
+        <div style="background: var(--rt-warningBg); padding: 4px 6px; border-radius: 4px; margin: 4px 0">
           <b>{{ contextTarget.character || '旁白' }}: {{ contextTarget.original_text }}</b>
         </div>
-        <div v-for="r in contextRows.after" :key="'a' + r.id" style="color: #888; padding: 2px 0">
+        <div v-for="r in contextRows.after" :key="'a' + r.id" class="rt-t3" style="padding: 2px 0">
           {{ r.character || '旁白' }}: {{ r.original_text }}
-          <span v-if="r.translated_text" style="color: #6a6">→ {{ r.translated_text }}</span>
+          <span v-if="r.translated_text" class="rt-primary">→ {{ r.translated_text }}</span>
         </div>
       </div>
     </n-modal>

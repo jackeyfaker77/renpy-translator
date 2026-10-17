@@ -35,7 +35,7 @@ function onClose() {
                size="small">
           {{ running ? '上传中' : task.status === 'cancelled' ? '已取消' : '失败' }}
         </n-tag>
-        <span style="font-size: 13px; color: #aaa">
+        <span class="rt-fs13 rt-t2">
           {{ running ? '本地传输，大文件需等待；关闭对话框不会中断上传' : '' }}
         </span>
       </n-space>

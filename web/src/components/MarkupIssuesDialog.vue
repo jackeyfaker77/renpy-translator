@@ -187,7 +187,7 @@ function shortFile(f: string) {
             <div style="font-size: 13px; margin-bottom: 4px; opacity: 0.85">
               原文：{{ it.original }}
             </div>
-            <div style="font-size: 12px; margin-bottom: 6px; color: #e88080">
+            <div class="rt-fs12 rt-error" style="margin-bottom: 6px">
               {{ it.reasons.join('；') }}
             </div>
             <n-space align="center" size="small">

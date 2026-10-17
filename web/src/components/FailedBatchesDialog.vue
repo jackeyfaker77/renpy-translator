@@ -154,7 +154,7 @@ async function clearAll() {
 
     <div class="modal-scroll">
       <div v-for="it in items" :key="it.id"
-           style="border: 1px solid #444; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px">
+           style="border: 1px solid var(--rt-border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px">
         <n-space align="center" justify="space-between" wrap style="margin-bottom: 4px">
           <n-space align="center">
             <n-text depth="3" style="font-size: 12px">#{{ it.id }}</n-text>

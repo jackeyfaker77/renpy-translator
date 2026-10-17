@@ -126,7 +126,7 @@ const factions = computed(() => {
 
 function factionColor(f: string): string {
   const idx = factions.value.findIndex(([name]) => name === f)
-  return idx >= 0 ? FACTION_PALETTE[idx % FACTION_PALETTE.length] : '#909399'
+  return idx >= 0 ? FACTION_PALETTE[idx % FACTION_PALETTE.length] : 'var(--rt-text3)'
 }
 
 const visibleRelations = computed(() =>
@@ -399,7 +399,7 @@ async function renderGraph() {
     dataIds = []
     ordered.forEach((key, i) => {
       const c = charMap.value.get(key)!
-      const color = c.faction ? factionColor(c.faction) : '#909399'
+      const color = c.faction ? factionColor(c.faction) : 'var(--rt-text3)'
       const angle = -Math.PI / 2 + (i * 2 * Math.PI) / N   // 顶部起顺时针
       const x = R * Math.cos(angle)
       const y = R * Math.sin(angle)
@@ -438,7 +438,7 @@ async function renderGraph() {
         symbolSize: size * f,
         itemStyle: c.has_avatar
           ? undefined
-          : { color: '#2a2a30', borderColor: color,
+          : { color: 'var(--rt-surface3)', borderColor: color,
               borderWidth: 3 * Math.max(f, 0.5) },
         label: {
           show: true,
@@ -547,7 +547,7 @@ async function renderGraph() {
     const c = charMap.value.get(id)!
     return {
       x: p[0], y: p[1],
-      color: c.faction ? factionColor(c.faction) : '#909399',
+      color: c.faction ? factionColor(c.faction) : 'var(--rt-text3)',
       r: 5,
     }
   }))
@@ -1252,7 +1252,7 @@ async function saveAdd() {
   height: 130px;
   border-radius: 6px;
   border: 1px solid rgba(255,255,255,0.07);
-  background: #1f1f24;
+  background: var(--rt-surface2);
   overflow: hidden;
   z-index: 5;
 }
@@ -1275,7 +1275,7 @@ async function saveAdd() {
   object-fit: cover;
   object-position: top;
   border-radius: 8px;
-  background: #2a2a30;
+  background: var(--rt-surface3);
 }
 .avatar-grid {
   display: grid;
@@ -1291,10 +1291,10 @@ async function saveAdd() {
   border-radius: 6px;
   border: 2px solid transparent;
   cursor: pointer;
-  background: #1c1c20;
+  background: var(--rt-surface1);
 }
 .avatar-cand.active {
-  border-color: var(--gt-primary, #34d399);
+  border-color: var(--gt-primary, var(--rt-primary));
 }
 .rel-row {
   display: flex;

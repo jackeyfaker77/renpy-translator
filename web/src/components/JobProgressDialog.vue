@@ -60,7 +60,7 @@ watch(isTerminal, (v) => { if (v) emit('finished', props.job) })
     <n-space vertical>
       <n-space align="center">
         <n-tag :type="statusType" size="small">{{ statusText }}</n-tag>
-        <span style="font-size: 13px; color: #aaa">{{ job.stage }}</span>
+        <span class="rt-fs13 rt-t2">{{ job.stage }}</span>
       </n-space>
 
       <progress-line
@@ -91,7 +91,7 @@ watch(isTerminal, (v) => { if (v) emit('finished', props.job) })
         可重新发起同一操作——翻译类任务会自动跳过已完成部分继续。
       </n-alert>
 
-      <n-scrollbar v-if="job.logs.length" ref="logRef" style="max-height: 220px; background: #141414; border-radius: 6px; padding: 8px">
+      <n-scrollbar v-if="job.logs.length" ref="logRef" style="max-height: 220px; background: var(--rt-surface0); border-radius: 6px; padding: 8px">
         <div v-for="(line, i) in job.logs" :key="i" style="font-size: 12px; font-family: monospace; white-space: pre-wrap">{{ line }}</div>
       </n-scrollbar>
 

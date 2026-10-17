@@ -412,11 +412,11 @@ onUnmounted(() => {
         </template>
         <n-text v-else depth="3" style="font-size: 12px">就绪</n-text>
         <n-button v-if="failedInView.length" size="tiny" quaternary
-                  style="color: #e88080" @click="openJobsDrawer">
+                  class="rt-error" @click="openJobsDrawer">
           {{ failedInView.length }} 个任务失败
         </n-button>
         <n-button v-if="session.interruptedJobs" size="tiny" quaternary
-                  style="color: #f2c97d" @click="openJobsDrawer">
+                  class="rt-warning" @click="openJobsDrawer">
           {{ session.interruptedJobs }} 个任务被中断
         </n-button>
       </n-space>
@@ -433,7 +433,7 @@ onUnmounted(() => {
   <n-modal :show="restarting" preset="card" title="正在重启服务" style="width: min(400px, 96vw)"
            :mask-closable="false" :closable="false">
     <n-space vertical>
-      <span style="font-size: 13px; color: #ccc">
+      <span class="rt-fs13 rt-t2">
         为释放被占用的文件并完成迁移清理，服务正在自动重启。<br>
         恢复后页面会自动刷新，请稍候...
       </span>
@@ -444,7 +444,7 @@ onUnmounted(() => {
   <n-modal :show="serverDown && !restarting" preset="card" title="服务已停止" style="width: min(400px, 96vw)"
            :mask-closable="false" :closable="false">
     <n-space vertical>
-      <span style="font-size: 13px; color: #ccc">
+      <span class="rt-fs13 rt-t2">
         后台服务已退出（托盘「退出服务」或 --mode stop）。<br>
         重新启动服务后点击下方按钮重连。
       </span>
@@ -461,7 +461,7 @@ onUnmounted(() => {
       </n-text>
       <div v-if="updateInfo?.notes">
         <div style="font-weight: 600; margin: 8px 0 4px">更新说明</div>
-        <div class="modal-scroll" style="font-size: 13px; color: #ccc; white-space: pre-line">
+        <div class="modal-scroll rt-fs13 rt-t2" style="white-space: pre-line">
           {{ updateInfo.notes }}
         </div>
       </div>
@@ -501,9 +501,9 @@ onUnmounted(() => {
   <!-- 全局任务进度对话框（刷新/切路由后自动重开） -->
   <job-progress-dialog v-for="j in dialogJobs" :key="j.id" :job="j">
     <template #question="{ question }">
-      <div v-if="question && question.type === 'confirm'" style="border-top: 1px solid #333; padding-top: 12px">
+      <div v-if="question && question.type === 'confirm'" style="border-top: 1px solid var(--rt-border); padding-top: 12px">
         <div style="font-weight: 600; margin-bottom: 6px">{{ question.payload.title }}</div>
-        <div style="font-size: 13px; color: #ccc; white-space: pre-line">{{ question.payload.body }}</div>
+        <div class="rt-fs13 rt-t2" style="white-space: pre-line">{{ question.payload.body }}</div>
         <n-space justify="end" style="margin-top: 10px">
           <!-- 官中三动作：keep_label 存在时展示 取消/保留/删除 -->
           <template v-if="question.payload.keep_label">
@@ -540,7 +540,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 0 10px;
   font-size: 12px;
-  background: var(--n-color, #18181c);
+  background: var(--n-color, var(--rt-surface1));
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   z-index: 200;
 }

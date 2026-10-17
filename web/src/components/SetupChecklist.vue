@@ -32,8 +32,8 @@ const doneCount = () => props.items.filter((i) => i.done).length
           width: '22px', height: '22px', borderRadius: '50%', flex: 'none',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: '12px', fontWeight: 600,
-          background: item.done ? 'var(--n-color-target, #63e2b7)' : 'rgba(255,255,255,0.08)',
-          color: item.done ? '#101014' : 'rgba(255,255,255,0.68)',
+          background: item.done ? 'var(--n-color-target, var(--rt-primary))' : 'rgba(255,255,255,0.08)',
+          color: item.done ? 'var(--rt-surface0)' : 'rgba(255,255,255,0.68)',
         }">
           {{ item.done ? '✓' : idx + 1 }}
         </span>

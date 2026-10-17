@@ -295,11 +295,12 @@ const columns: DataTableColumns<NameRow> = [
       }
       // 无显示名角色没有可翻译的名字：不允许手动输入翻译
       if (!r.original) {
-        return h('span', { style: 'color: #555; display: block; min-height: 20px' },
+        return h('span', { class: 'rt-t3', style: 'display: block; min-height: 20px' },
           '（无需翻译）')
       }
       return h('span', {
-        style: `cursor: text; display: block; min-height: 20px; ${r.translated ? '' : 'color: #666'}`,
+        class: r.translated ? undefined : 'rt-t3',
+        style: 'cursor: text; display: block; min-height: 20px',
         onClick: () => startEdit(r),
       }, r.translated || '（点击输入中文名）')
     },
@@ -407,7 +408,7 @@ onMounted(load)
              :title="`${profileName} - 人物特征`" style="width: min(640px, 96vw)">
       <div class="modal-scroll">
         <div v-for="(value, key) in profileData" :key="key" style="margin-bottom: 10px">
-          <n-text strong style="color: #7eb8ff">【{{ key }}】</n-text>
+          <n-text strong class="rt-info">【{{ key }}】</n-text>
           <div style="padding-left: 12px; white-space: pre-wrap; font-size: 13px">{{ value }}</div>
         </div>
       </div>

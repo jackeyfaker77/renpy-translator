@@ -1337,7 +1337,7 @@ function speakersOfFull(s: ApiScene) {
   height: 130px;
   border-radius: 6px;
   border: 1px solid rgba(255,255,255,0.07);
-  background: #1f1f24;
+  background: var(--rt-surface2);
   overflow: hidden;
   z-index: 5;
 }
@@ -1360,10 +1360,10 @@ function speakersOfFull(s: ApiScene) {
   border-radius: 4px;
   border: 2px solid transparent;
   cursor: pointer;
-  background: #1c1c20;
+  background: var(--rt-surface1);
 }
 .thumb-cand.active {
-  border-color: var(--gt-primary, #34d399);
+  border-color: var(--gt-primary, var(--rt-primary));
 }
 .speaker {
   display: inline-flex;
@@ -1376,7 +1376,7 @@ function speakersOfFull(s: ApiScene) {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #2a2a30;
+  background: var(--rt-surface3);
   overflow: hidden;
   display: inline-flex;
   align-items: center;
@@ -1408,7 +1408,7 @@ function speakersOfFull(s: ApiScene) {
   flex-shrink: 0;
   min-width: 56px;
   font-weight: 600;
-  color: #70c0e8;
+  color: var(--rt-info);
 }
 .dlg-speaker.narrator { color: rgba(255,255,255,0.45); font-weight: 400; }
 .dlg-cn { color: rgba(255,255,255,0.9); }
