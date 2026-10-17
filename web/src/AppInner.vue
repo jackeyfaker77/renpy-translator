@@ -81,47 +81,37 @@ function onHelpMenuSelect(key: string) {
 }
 
 // ---- 顶栏项目上下文菜单（切换/新建/导入/管理/关闭） ----
-const projectMenuOptions = computed<DropdownOption[]>(() => [
-  {
-    label: '切换项目', key: 'switch', disabled: !projectsStore.list.length,
-    children: projectsStore.list.map((p) => ({
-      label: p.name === session.currentProject ? `${p.name}（当前）` : p.name,
-      key: 'open:' + p.name,
-      disabled: p.name === session.currentProject,
-    })),
-  },
-  { type: 'divider', key: 'd-proj' },
-  { label: '新建项目…', key: 'new' },
-  { label: '导入项目…', key: 'import' },
-  { label: '管理项目', key: 'manage' },
-  ...(session.currentProject
-    ? [{ type: 'divider' as const, key: 'd-close' },
-       { label: '关闭项目', key: 'close' }]
-    : []),
-])
+/** 项目下拉只管「切换项目」；新建/导入/管理/关闭是旁边看得见的按钮
+ *  （全部藏进菜单会把管理入口埋太深） */
+const switchOptions = computed<DropdownOption[]>(() =>
+  projectsStore.list.map((p) => ({
+    label: p.name === session.currentProject ? `${p.name}（当前）` : p.name,
+    key: 'open:' + p.name,
+    disabled: p.name === session.currentProject,
+  })))
 
 async function onProjectMenuSelect(key: string) {
-  if (key === 'new' || key === 'import' || key === 'manage') {
-    if (route.path !== '/projects') {
-      await router.push({ path: '/projects', query: key === 'manage' ? {} : { dialog: key } })
-    } else if (key !== 'manage') {
-      // 已在项目库页：直接用 query 触发（watch 依赖 query 变化）
-      await router.replace({ path: '/projects', query: { dialog: key } })
-    }
-    return
-  }
-  if (key === 'close') {
-    try {
-      await session.close()
-      await projectsStore.refresh()
-      await router.push('/projects')
-    } catch (e) {
-      toastError(message, e)
-    }
-    return
-  }
   if (key.startsWith('open:')) {
     await onProjectChange(key.slice(5))
+  }
+}
+
+/** 新建/导入：跳项目库并用 query 触发对应弹窗 */
+async function gotoProjectsDialog(dialog: 'create' | 'import') {
+  if (route.path !== '/projects') {
+    await router.push({ path: '/projects', query: { dialog } })
+  } else {
+    await router.replace({ path: '/projects', query: { dialog } })
+  }
+}
+
+async function closeProject() {
+  try {
+    await session.close()
+    await projectsStore.refresh()
+    await router.push('/projects')
+  } catch (e) {
+    toastError(message, e)
   }
 }
 
@@ -352,25 +342,34 @@ onUnmounted(() => {
 
 <template>
   <n-layout style="height: 100vh">
-    <n-layout-header bordered style="padding: 0 16px; height: 52px; display: flex; align-items: center; gap: 12px">
-      <span style="font-size: 16px; font-weight: 600">Ren'Py 翻译工具</span>
-      <!-- 项目上下文：名称 + 进度，点开切换/新建/导入/管理/关闭 -->
-      <n-dropdown trigger="click" :options="projectMenuOptions" @select="onProjectMenuSelect">
-        <n-button size="small" quaternary style="max-width: 460px">
-          <n-ellipsis style="max-width: 170px">
+    <n-layout-header bordered style="padding: 0 16px; height: 52px; display: flex; align-items: center; gap: 8px; overflow: hidden">
+      <span style="font-size: 16px; font-weight: 600; white-space: nowrap">Ren'Py 翻译工具</span>
+      <!-- 切换项目：实边按钮 + 常显 ▾，一眼可点 -->
+      <n-dropdown trigger="click" :options="switchOptions" @select="onProjectMenuSelect">
+        <n-button size="small" style="max-width: 240px; flex: none">
+          <n-ellipsis style="max-width: 190px">
             {{ session.currentProject || '选择项目' }}
           </n-ellipsis>
-          <n-text v-if="session.progressText" depth="3"
-                  style="font-size: 12px; margin-left: 8px">
-            <n-ellipsis style="max-width: 240px">{{ session.progressText }}</n-ellipsis>
-          </n-text>
-          <span v-else style="font-size: 12px; margin-left: 8px; opacity: 0.6">▾</span>
+          <span style="margin-left: 6px; opacity: 0.75">▾</span>
         </n-button>
       </n-dropdown>
+      <!-- 进度：完整展示不截断 -->
+      <n-tag v-if="session.progressText" size="small" type="success" style="flex: none">
+        {{ session.progressText }}
+      </n-tag>
       <n-tag v-if="session.currentProject && !session.hasTranslator" size="small" type="warning"
-             style="cursor: pointer" @click="router.push('/settings?new=1')">
+             style="cursor: pointer; flex: none" @click="router.push('/settings?new=1')">
         未配置模型 · 去配置
       </n-tag>
+      <!-- 项目操作：实体按钮并排，不埋进菜单 -->
+      <n-button size="small" quaternary style="flex: none"
+                title="新建项目" @click="gotoProjectsDialog('create')">新建</n-button>
+      <n-button size="small" quaternary style="flex: none"
+                title="导入项目包" @click="gotoProjectsDialog('import')">导入</n-button>
+      <n-button size="small" quaternary style="flex: none"
+                title="管理项目（项目库）" @click="router.push('/projects')">管理</n-button>
+      <n-button v-if="session.currentProject" size="small" quaternary style="flex: none"
+                title="关闭当前项目" @click="closeProject">关闭</n-button>
       <span style="flex: 1" />
       <!-- 铃铛：入口常驻（才能被学会），徽标=等待确认/失败数 -->
       <n-badge :value="bellBadge" :max="99" :show="bellBadge > 0" type="error">

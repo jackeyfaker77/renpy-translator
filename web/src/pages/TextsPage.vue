@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import {
   NButton, NCard, NCheckbox, NDataTable, NDropdown, NEmpty, NInput, NModal,
   NPagination, NPopconfirm, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch,
-  NTag, NText, NTooltip, useDialog, useMessage,
+  NText, NTooltip, useDialog, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, DataTableSortState } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
@@ -438,9 +438,7 @@ const translateMenuOptions = computed(() => [
   { key: 'all', label: '翻译全部未翻译' },
   { key: 'filtered', label: `翻译当前筛选（共 ${total.value} 条）`, disabled: total.value === 0 },
   ...(isDialogue.value ? [{ key: 'role', label: '翻译指定角色…' }] : []),
-  { type: 'divider', key: 'd-translate' },
   { key: 'page', label: `翻译本页（${rows.value.length} 条）` },
-  { key: 'tune', label: '本次翻译设置…' },
 ])
 
 // ---- 导出/导入/更多（L2/L3 收纳） ----
@@ -762,11 +760,15 @@ watch(() => [query.filter_mode, query.character], () => {
         <n-dropdown v-else :options="translateMenuOptions" @select="onTranslateMenu">
           <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)">开始翻译 ▾</n-button>
         </n-dropdown>
-        <n-tag size="small" type="info" style="cursor: pointer"
-               title="点击展开本次翻译设置"
-               @click="tuneOpen = !tuneOpen">
-          {{ presetLabels[translatePreset] }}
-        </n-tag>
+        <!-- 翻译模式：可见可点（藏进菜单会被当成纯文本标签） -->
+        <n-select
+          :value="translatePreset" size="small" style="width: 104px"
+          :options="presetOptions" :disabled="savingOptions"
+          @update:value="applyPreset"
+        />
+        <n-button size="small" quaternary @click="tuneOpen = !tuneOpen">
+          {{ tuneOpen ? '收起微调' : '微调' }}
+        </n-button>
 
         <!-- L2 次操作：数据交换与事件 -->
         <n-dropdown :options="exportMenuOptions" @select="onExportMenu">
