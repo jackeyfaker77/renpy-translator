@@ -22,12 +22,12 @@ def test_default_is_deep_full_effects():
 def test_presets_mapping():
     light = options_from_preset('light')
     assert light.flags() == {
-        'term_extract': False, 'glossary': True, 'style_guide': False,
-        'character_profile': 'advice_only', 'context': False}
+        'term_extract': False, 'glossary': True, 'names': True,
+        'style_guide': False, 'character_profile': 'advice_only', 'context': False}
     bulk = options_from_preset('bulk')
     assert bulk.flags() == {
-        'term_extract': False, 'glossary': False, 'style_guide': False,
-        'character_profile': 'off', 'context': False}
+        'term_extract': False, 'glossary': False, 'names': False,
+        'style_guide': False, 'character_profile': 'off', 'context': False}
 
 
 def test_parse_custom_and_bad_data():
@@ -60,11 +60,13 @@ class _CaptureTranslator:
 
     def translate_batch(self, items, content_type='', glossary_text='',
                         character_profiles='', context_before=None,
-                        style_guide='', context_window_tokens=0):
+                        style_guide='', characters_text='',
+                        context_window_tokens=0):
         self.calls.append({
             'glossary_text': glossary_text, 'style_guide': style_guide,
             'character_profiles': character_profiles,
             'context_before': context_before or [],
+            'characters_text': characters_text,
         })
         terms = [{'en_term': 'Kingdom', 'cn_term': '王国'}] if content_type != 'ui' else []
         return ({i: f'译文{i}' for i in range(len(items))}, terms, {}, {})
@@ -86,7 +88,7 @@ def db(tmp_path):
     db = ProjectDatabase(str(tmp_path / 'p.db'))
     db.connect()
     db.insert_dialogues([
-        {'id': 1, 'original_text': 'Hello there.', 'character': 'a',
+        {'id': 1, 'original_text': 'Hello Kingdom there.', 'character': 'a',
          'translated_text': '', 'is_translated': False},
         {'id': 2, 'original_text': 'Bye.', 'character': 'a',
          'translated_text': '', 'is_translated': False},
@@ -109,7 +111,7 @@ def _service(db, translator):
 
 
 def _items():
-    return [{'id': 1, 'original_text': 'Hello there.', 'character': 'a',
+    return [{'id': 1, 'original_text': 'Hello Kingdom there.', 'character': 'a',
              'translated_text': ''},
             {'id': 2, 'original_text': 'Bye.', 'character': 'a',
              'translated_text': ''}]
@@ -173,3 +175,38 @@ def test_deep_still_saves_terms(db):
     finally:
         svc.close()
     assert added and added[0][0]['en_term'] == 'Kingdom'
+
+
+def test_matched_injection_skips_unmentioned(db):
+    """匹配注入：本批没出现的术语不注入；说话人人名直通注入"""
+    db.upsert_glossary_batch([('Dragon', '巨龙')])  # 文本里没有 → 不注入
+    db.insert_characters([
+        {'variable': 'a', 'display_name': 'Alice', 'cn_name': '爱丽丝'},
+    ])
+    db.set_meta('translate_options', options_from_preset('deep').to_json())
+    tr = _CaptureTranslator()
+    svc = _service(db, tr)
+    try:
+        _run(svc.translate_batch(_items(), 'dialogue'))
+    finally:
+        svc.close()
+    call = tr.calls[0]
+    assert '王国' in call['glossary_text']      # 本批出现的注入
+    assert '巨龙' not in call['glossary_text']  # 未出现的不注入
+    assert 'Alice → 爱丽丝' in call['characters_text']  # 说话人直通
+
+
+def test_names_flag_off_drops_characters_text(db):
+    """names 开关关闭（如纯批量）：人名表不注入"""
+    db.insert_characters([
+        {'variable': 'a', 'display_name': 'Alice', 'cn_name': '爱丽丝'},
+    ])
+    db.set_meta('translate_options', options_from_preset('bulk').to_json())
+    tr = _CaptureTranslator()
+    svc = _service(db, tr)
+    try:
+        _run(svc.translate_batch(_items(), 'dialogue'))
+    finally:
+        svc.close()
+    assert tr.calls[0]['characters_text'] == ''
+    assert tr.calls[0]['glossary_text'] == ''

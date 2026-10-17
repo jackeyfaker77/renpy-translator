@@ -222,13 +222,14 @@ function searchKeydown(e: KeyboardEvent) {
 interface TranslateFlags {
   term_extract: boolean
   glossary: boolean
+  names: boolean
   style_guide: boolean
   character_profile: 'full' | 'advice_only' | 'off'
   context: boolean
 }
 const translatePreset = ref('deep')
 const translateFlags = ref<TranslateFlags>({
-  term_extract: true, glossary: true, style_guide: true,
+  term_extract: true, glossary: true, names: true, style_guide: true,
   character_profile: 'full', context: true,
 })
 const tuneOpen = ref(false)
@@ -823,6 +824,12 @@ watch(() => [query.filter_mode, query.character], () => {
           <n-switch :value="translateFlags.glossary" size="small"
                     :disabled="savingOptions"
                     @update:value="(v: boolean) => setFlag('glossary', v)" />
+        </n-space>
+        <n-space align="center">
+          <n-text style="font-size: 12px">人名表</n-text>
+          <n-switch :value="translateFlags.names" size="small"
+                    :disabled="savingOptions"
+                    @update:value="(v: boolean) => setFlag('names', v)" />
         </n-space>
         <n-space align="center">
           <n-text style="font-size: 12px">风格指南</n-text>

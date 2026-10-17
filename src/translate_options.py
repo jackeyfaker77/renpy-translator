@@ -13,19 +13,19 @@ import json
 from dataclasses import dataclass
 
 PROFILE_MODES = ('full', 'advice_only', 'off')
-FLAG_KEYS = ('term_extract', 'glossary', 'style_guide', 'character_profile', 'context')
+FLAG_KEYS = ('term_extract', 'glossary', 'names', 'style_guide', 'character_profile', 'context')
 
 PRESETS = {
     # 深度：全效果（现状默认）——人物特征/术语/风格/上下文齐上
-    'deep': {'term_extract': True, 'glossary': True, 'style_guide': True,
-             'character_profile': 'full', 'context': True},
+    'deep': {'term_extract': True, 'glossary': True, 'names': True,
+             'style_guide': True, 'character_profile': 'full', 'context': True},
     # 轻量：低成本高收益项——留术语表（短静态、缓存友好、防人名漂移）
     # 与「翻译建议」（档案里对译法约束最强、又便宜的一段）
-    'light': {'term_extract': False, 'glossary': True, 'style_guide': False,
-              'character_profile': 'advice_only', 'context': False},
+    'light': {'term_extract': False, 'glossary': True, 'names': True,
+              'style_guide': False, 'character_profile': 'advice_only', 'context': False},
     # 纯批量：无附加效果，最快最省
-    'bulk': {'term_extract': False, 'glossary': False, 'style_guide': False,
-             'character_profile': 'off', 'context': False},
+    'bulk': {'term_extract': False, 'glossary': False, 'names': False,
+             'style_guide': False, 'character_profile': 'off', 'context': False},
 }
 
 PRESET_LABELS = {'deep': '深度', 'light': '轻量', 'bulk': '纯批量', 'custom': '自定义'}
@@ -36,6 +36,7 @@ class TranslateOptions:
     preset: str = 'deep'
     term_extract: bool = True
     glossary: bool = True
+    names: bool = True          # 人名表注入（与术语表解耦——关术语不丢人名）
     style_guide: bool = True
     character_profile: str = 'full'
     context: bool = True
@@ -44,6 +45,7 @@ class TranslateOptions:
         return {
             'term_extract': self.term_extract,
             'glossary': self.glossary,
+            'names': self.names,
             'style_guide': self.style_guide,
             'character_profile': self.character_profile,
             'context': self.context,
@@ -80,7 +82,7 @@ def parse_options(raw) -> TranslateOptions:
                 flags[k] = flags_src[k]
     if flags['character_profile'] not in PROFILE_MODES:
         flags['character_profile'] = 'full'
-    for k in ('term_extract', 'glossary', 'style_guide', 'context'):
+    for k in ('term_extract', 'glossary', 'names', 'style_guide', 'context'):
         flags[k] = bool(flags[k])
     if preset not in PRESET_LABELS:
         preset = 'custom'

@@ -70,7 +70,11 @@ class TranslationService:
         return self._running
 
     def _get_glossary_text(self) -> str:
-        """获取术语表 + 人名表提示词文本（同步，在线程池中调用）"""
+        """获取术语表 + 人名表提示词文本（同步，在线程池中调用）
+
+        全量注入（人名翻译的风格锚点与分批预算估算仍用它）；
+        对话/UI 批翻译走 _matched_prompt_texts 按批匹配注入。
+        """
         glossary = self.db.get_glossary_for_prompt()
         characters = self.db.get_characters_for_prompt()
         parts = []
@@ -79,6 +83,74 @@ class TranslationService:
         if glossary:
             parts.append(glossary)
         return "\n\n".join(parts) if parts else ""
+
+    def _matched_prompt_texts(self, items: list, extra_texts=None) -> tuple:
+        """按批内容匹配注入（同步，在线程池中调用）
+
+        返回 (characters_text, glossary_text)：只注入本批待译原文与前文
+        上下文命中的条目（词面命中或归一化边界包含，见 prompt_match）。
+        命中率 ≥95% 时回退全量注入——此时全量与匹配几乎等价，保持提示
+        词稳定还能吃前缀缓存。
+        """
+        from prompt_match import match_entries
+
+        texts = [it.get('original_text', '') for it in items]
+        texts += [t for t in (extra_texts or []) if t]
+
+        # ---- 人名表 ----
+        characters_text = ''
+        rows = self.db.get_characters()
+        name_entries = [{'i': i, 'en': (c.get('display_name') or '').strip()}
+                        for i, c in enumerate(rows)
+                        if not c.get('is_placeholder')
+                        and (c.get('cn_name') or '').strip()
+                        and (c.get('display_name') or '').strip()]
+        if name_entries:
+            # 本批说话人的显示名直通注入（台词里没提到也必须一致）
+            var_map = self.db.get_variable_map()
+            speakers = {var_map.get(it.get('character'), '')
+                        for it in items if it.get('character')}
+            hits = {h['i'] for h in match_entries(texts, name_entries)}
+            kept = [rows[i] for i in hits]
+            kept += [c for c in rows
+                     if (c.get('display_name') or '').strip() in speakers
+                     and c not in kept
+                     and not c.get('is_placeholder')
+                     and (c.get('cn_name') or '').strip()]
+            if len(kept) >= len(name_entries) * 0.95:
+                characters_text = self.db.get_characters_for_prompt()
+            elif kept:
+                lines = ["人名对照表（翻译时请使用以下中文名，保持一致性）："]
+                for c in kept:
+                    lines.append(f"  {c['display_name']} → {c['cn_name']}")
+                characters_text = "\n".join(lines)
+
+        # ---- 术语表（静态 UI 参考译表 + 库内词条，同格式分节） ----
+        glossary_text = ''
+        db_rows = self.db.get_glossary_rows_for_prompt()
+        all_entries = (
+            [{'ui': True, 'en': en, 'cn': cn} for en, cn in self.db.UI_GLOSSARY.items()]
+            + [{'ui': False, 'en': r['en_term'], 'cn': r['cn_term']}
+               for r in db_rows])
+        hits = match_entries(texts, all_entries)
+        if len(hits) >= len(all_entries) * 0.95:
+            glossary_text = self.db.get_glossary_for_prompt()
+        elif hits:
+            ui_hits = [h for h in hits if h['ui']]
+            game_hits = [h for h in hits if not h['ui']]
+            lines = ["已有术语表（以下术语已有翻译，请直接使用，不要重复提取）："]
+            lines.append("")
+            lines.append("【UI/菜单文字】")
+            for h in ui_hits:
+                lines.append(f"  {h['en']} → {h['cn']}")
+            if game_hits:
+                lines.append("")
+                lines.append("【游戏术语】")
+                for h in game_hits:
+                    lines.append(f"  {h['en']} → {h['cn']}")
+            glossary_text = "\n".join(lines)
+
+        return characters_text, glossary_text
 
     def _get_style_guide(self) -> str:
         """获取作品风格指南（同步，在线程池中调用）"""
@@ -219,14 +291,6 @@ class TranslationService:
         # 翻译模式开关：关闭的注入项直接置空，[[?token]] 可选段整段消失
         opts = await loop.run_in_executor(None, self._load_options)
 
-        # 术语表 + 人名表 + 风格指南（每批一次，不再每句一次）
-        glossary_text = ''
-        if opts.glossary:
-            glossary_text = await loop.run_in_executor(None, self._get_glossary_text)
-        style_guide = ''
-        if opts.style_guide:
-            style_guide = await loop.run_in_executor(None, self._get_style_guide)
-
         # 批内角色特征汇总（仅对话；轻量模式只注入「翻译建议」）
         character_profiles = ""
         if content_type == 'dialogue' and opts.character_profile != 'off':
@@ -238,16 +302,32 @@ class TranslationService:
                         chars, self.db.get_profile, only_keys=only_keys)
                 )
 
-        # 前文上下文（取批内首条；批内句子互为上下文，取消后文参考）
+        # 前文上下文（取批内首条；批内句子互为上下文，取消后文参考）。
+        # 预算按全量术语/档案保守估算——实际注入的是匹配子集，只会更小
         context_before = []
         if opts.context:
-            context_count = min(self._calc_context_count(glossary_text, character_profiles), 8)
+            budget_text = (self._get_glossary_text()
+                           if (opts.glossary or opts.names) else '')
+            context_count = min(self._calc_context_count(budget_text, character_profiles), 8)
             first_id = items[0]['id']
 
             def _get_context():
                 return self.db.get_dialogue_context(first_id, content_type, count=context_count)
 
             context_before, _ = await loop.run_in_executor(None, _get_context)
+
+        style_guide = ''
+        if opts.style_guide:
+            style_guide = await loop.run_in_executor(None, self._get_style_guide)
+
+        # 术语表 + 人名表：按批内容（含上下文行）匹配注入，不再全量重发
+        names_text = glossary_text = ''
+        if opts.glossary or opts.names:
+            def _match():
+                extra = [r.get('original_text', '') for r in context_before]
+                nt, gt = self._matched_prompt_texts(items, extra)
+                return (nt if opts.names else ''), (gt if opts.glossary else '')
+            names_text, glossary_text = await loop.run_in_executor(None, _match)
 
         async with self._semaphore:
             cache_before = (getattr(self.translator, 'cache_hit_total', 0),
@@ -263,6 +343,7 @@ class TranslationService:
                             character_profiles=character_profiles,
                             context_before=context_before,
                             style_guide=style_guide,
+                            characters_text=names_text,
                             context_window_tokens=self.max_context_k * 1024,
                         )
                     )
@@ -306,7 +387,9 @@ class TranslationService:
                     saved[it['id']] = text
             if terms and opts.term_extract:
                 for t in terms:
-                    t['term_type'] = 'other'
+                    # UI 翻译提取的术语单独归类：只进 UI 分节，不再污染
+                    # 游戏术语区（对话批次无需注入界面词）
+                    t['term_type'] = 'ui' if content_type == 'ui' else 'other'
                     t['source'] = 'ai'
                 self.db.add_glossary_batch(terms)
             failed_items = [
@@ -352,14 +435,6 @@ class TranslationService:
                 # 翻译模式开关：关闭的注入项置空（[[?token]] 整段消失）
                 opts = await loop.run_in_executor(None, self._load_options)
 
-                # 获取术语表 + 人名表 + 风格指南
-                glossary_text = ''
-                if opts.glossary:
-                    glossary_text = await loop.run_in_executor(None, self._get_glossary_text)
-                style_guide = ''
-                if opts.style_guide:
-                    style_guide = await loop.run_in_executor(None, self._get_style_guide)
-
                 # 获取角色特征（对话翻译时；轻量模式只留「翻译建议」）
                 character_profile = ""
                 if character and content_type == 'dialogue' and opts.character_profile != 'off':
@@ -376,11 +451,13 @@ class TranslationService:
                         return f"当前说话角色 [{character}] 的人物特征：\n" + "\n".join(lines)
                     character_profile = await loop.run_in_executor(None, _get_profile)
 
-                # 动态计算上下文行数
+                # 动态计算上下文行数（预算按全量术语保守估算）
                 context_before, context_after = [], []
                 if opts.context:
+                    budget_text = (self._get_glossary_text()
+                                   if (opts.glossary or opts.names) else '')
                     context_count = self._calc_context_count(
-                        glossary_text, character_profile
+                        budget_text, character_profile
                     )
 
                     # 获取 label 上下文
@@ -388,6 +465,25 @@ class TranslationService:
                         return self.db.get_dialogue_context(item_id, content_type, count=context_count)
 
                     context_before, context_after = await loop.run_in_executor(None, _get_context)
+
+                style_guide = ''
+                if opts.style_guide:
+                    style_guide = await loop.run_in_executor(None, self._get_style_guide)
+
+                # 术语表 + 人名表：按本句+上下文匹配注入（name 类型保持全量——
+                # 人名翻译需要完整人名表做风格锚点）
+                names_text = glossary_text = ''
+                if content_type == 'name':
+                    if opts.glossary:
+                        glossary_text = await loop.run_in_executor(None, self._get_glossary_text)
+                elif opts.glossary or opts.names:
+                    def _match():
+                        extra = [r.get('original_text', '')
+                                 for r in context_before + context_after]
+                        item = {'original_text': original_text, 'character': character}
+                        nt, gt = self._matched_prompt_texts([item], extra)
+                        return (nt if opts.names else ''), (gt if opts.glossary else '')
+                    names_text, glossary_text = await loop.run_in_executor(None, _match)
 
                 # 翻译
                 result = await loop.run_in_executor(
@@ -401,6 +497,7 @@ class TranslationService:
                         context_before=context_before,
                         context_after=context_after,
                         style_guide=style_guide,
+                        characters_text=names_text,
                     )
                 )
 
@@ -423,7 +520,7 @@ class TranslationService:
                         # 保存 AI 提取的术语（term_extract 关闭时丢弃）
                         if terms and opts.term_extract:
                             for t in terms:
-                                t['term_type'] = 'other'
+                                t['term_type'] = 'ui' if content_type == 'ui' else 'other'
                                 t['source'] = 'ai'
                             self.db.add_glossary_batch(terms)
 
@@ -455,7 +552,8 @@ class TranslationService:
                             character_profile: str = "",
                             context_before: list = None,
                             context_after: list = None,
-                            style_guide: str = ""):
+                            style_guide: str = "",
+                            characters_text: str = ""):
         """在线程池中执行的单条翻译（同步方法）
 
         返回：
@@ -468,7 +566,8 @@ class TranslationService:
             )
         elif content_type == 'ui':
             return self.translator.translate_ui(
-                text, glossary_text=glossary_text, style_guide=style_guide, debug=False
+                text, glossary_text=glossary_text, style_guide=style_guide,
+                characters_text=characters_text, debug=False
             )
         elif content_type == 'dialogue':
             return self.translator.translate_text(
@@ -479,6 +578,7 @@ class TranslationService:
                 glossary_text=glossary_text,
                 character_profile=character_profile,
                 style_guide=style_guide,
+                characters_text=characters_text,
                 debug=False
             )
         return ""

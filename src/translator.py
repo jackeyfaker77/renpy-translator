@@ -175,6 +175,7 @@ class AITranslator:
                        glossary_text: str = "",
                        character_profile: str = "",
                        style_guide: str = "",
+                       characters_text: str = "",
                        debug: bool = False) -> tuple[str, list[dict]]:
         """翻译单行文本，返回 (译文, 术语列表)
 
@@ -194,6 +195,7 @@ class AITranslator:
             glossary_text=glossary_text,
             character_profile=character_profile,
             style_guide=style_guide,
+            characters_text=characters_text,
         )
         user_prompt = build_user_prompt(
             text, character, context_before, context_after
@@ -328,6 +330,7 @@ class AITranslator:
     def translate_ui(self, text: str, glossary_text: str = "",
                      character_dict: Dict[str, str] = None,
                      style_guide: str = "",
+                     characters_text: str = "",
                      debug: bool = False) -> tuple[str, list[dict]]:
         """翻译UI文字，返回 (译文, 术语列表)"""
         if not self.client:
@@ -340,7 +343,8 @@ class AITranslator:
         if not any(c.isalnum() for c in text):
             return text, []
 
-        system_prompt = build_ui_system_prompt(glossary_text, style_guide=style_guide)
+        system_prompt = build_ui_system_prompt(glossary_text, style_guide=style_guide,
+                                               characters_text=characters_text)
         user_prompt = build_ui_user_prompt(text)
 
         raw = self._call_api(
@@ -475,6 +479,7 @@ class AITranslator:
                         glossary_text: str = "", character_profiles: str = "",
                         context_before: List[dict] = None,
                         style_guide: str = "",
+                        characters_text: str = "",
                         context_window_tokens: Optional[int] = None,
                         debug: bool = False) -> tuple[Optional[List[str]], List[dict]]:
         """批次翻译多句文本
@@ -492,12 +497,14 @@ class AITranslator:
             return [], []
 
         if content_type == 'ui':
-            system_prompt = build_ui_system_prompt(glossary_text, style_guide=style_guide)
+            system_prompt = build_ui_system_prompt(glossary_text, style_guide=style_guide,
+                                                   characters_text=characters_text)
         else:
             system_prompt = build_system_prompt(
                 glossary_text=glossary_text,
                 character_profile=character_profiles,
                 style_guide=style_guide,
+                characters_text=characters_text,
             )
         user_prompt = build_batch_user_prompt(items, context_before, content_type)
 

@@ -22,10 +22,12 @@ def _render(pid: str, **kwargs) -> str:
 
 def build_system_prompt(glossary_text: str = "",
                         character_profile: str = "",
-                        style_guide: str = "") -> str:
+                        style_guide: str = "",
+                        characters_text: str = "") -> str:
     """构建对话翻译系统提示词"""
     return _render('dialogue.system', glossary_text=glossary_text,
-                   character_profile=character_profile, style_guide=style_guide)
+                   character_profile=character_profile, style_guide=style_guide,
+                   characters_text=characters_text)
 
 
 def build_user_prompt(text: str, character: str = "",
@@ -75,10 +77,11 @@ def build_name_user_prompt(name: str) -> str:
 # ========== UI 翻译 ==========
 
 def build_ui_system_prompt(glossary_text: str = "",
-                           style_guide: str = "") -> str:
+                           style_guide: str = "",
+                           characters_text: str = "") -> str:
     """构建 UI 翻译系统提示词"""
     return _render('ui.system', glossary_text=glossary_text,
-                   style_guide=style_guide)
+                   style_guide=style_guide, characters_text=characters_text)
 
 
 def build_ui_user_prompt(text: str) -> str:

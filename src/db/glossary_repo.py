@@ -154,6 +154,14 @@ class GlossaryRepo:
             "DELETE FROM glossary WHERE en_term=?", (en_term,))
         self._conn.commit()
 
+    def get_glossary_rows_for_prompt(self) -> list[dict]:
+        """全量术语行（rowid 序，与缓存前缀契约一致）：en/cn/type"""
+        rows = self._conn.execute(
+            "SELECT en_term, cn_term, term_type FROM glossary "
+            "WHERE cn_term != '' AND cn_term IS NOT NULL ORDER BY rowid"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     @_auto_reconnect
     def get_glossary_for_prompt(self) -> str:
         """获取术语表文本（用于提示词，供 AI 参考）
@@ -162,18 +170,18 @@ class GlossaryRepo:
         都会插入 AI 新术语，追加式增长才能保证批 N+1 的系统提示是
         批 N 的前缀超集（DeepSeek/OpenAI prompt 缓存按 token 0 起
         严格前缀匹配，乱序或中间插入会断掉全部前缀）"""
-        db_rows = self._conn.execute(
-            "SELECT en_term, cn_term, term_type FROM glossary "
-            "WHERE cn_term != '' AND cn_term IS NOT NULL ORDER BY rowid"
-        ).fetchall()
+        db_rows = self.get_glossary_rows_for_prompt()
 
         lines = ["已有术语表（以下术语已有翻译，请直接使用，不要重复提取）："]
 
-        # 静态 UI 术语
+        # 静态 UI 术语 + 翻译 UI 字符串时提取的术语（term_type=ui）
         lines.append("")
         lines.append("【UI/菜单文字】")
         for en, cn in self.UI_GLOSSARY.items():
             lines.append(f"  {en} → {cn}")
+        for r in db_rows:
+            if r["term_type"] == "ui":
+                lines.append(f"  {r['en_term']} → {r['cn_term']}")
 
         # 数据库中的游戏术语
         game_terms = [r for r in db_rows if r["term_type"] != "ui"]
