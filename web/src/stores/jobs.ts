@@ -21,7 +21,7 @@ export interface JobView {
   cancelling: boolean
 }
 
-interface JobRecord {
+export interface JobRecord {
   id: string
   kind: string
   label: string
@@ -32,6 +32,8 @@ interface JobRecord {
   question: JobView['question']
   result: JobView['result']
   error: string | null
+  created_at?: string
+  updated_at?: string
 }
 
 const TERMINAL = ['succeeded', 'failed', 'cancelled', 'interrupted']
@@ -39,17 +41,51 @@ const TERMINAL = ['succeeded', 'failed', 'cancelled', 'interrupted']
 /** 任务终态列表（页面 watch 刷新用） */
 export const JOB_TERMINAL_STATUS = TERMINAL
 
+/** 任务中心未读时间戳（localStorage 键） */
+export const TASKS_SEEN_KEY = 'rt.tasks.lastSeenJobAt'
+
 export const useJobsStore = defineStore('jobs', {
   state: () => ({
     jobs: new Map<string, JobView>(),
     channels: new Map<string, EventSource>(),
+    /** 历史任务（GET /api/jobs?limit=50；打开抽屉/终态时刷新，不轮询） */
+    history: [] as JobRecord[],
   }),
   getters: {
     activeJobs(state): JobView[] {
       return [...state.jobs.values()].filter((j) => !TERMINAL.includes(j.status))
     },
+    /** 本会话内失败/中断的任务视图（状态栏红字来源） */
+    failedInView(state): JobView[] {
+      return [...state.jobs.values()].filter(
+        (j) => j.status === 'failed' || j.status === 'interrupted')
+    },
+    /** 等待确认的任务（状态栏/铃铛红点来源） */
+    waitingJobs(): JobView[] {
+      return [...this.jobs.values()].filter((j) => j.status === 'waiting_input')
+    },
   },
   actions: {
+    /** 拉取历史任务列表（与 SSE 活跃任务按 id 在展示层合并） */
+    async loadHistory() {
+      try {
+        const rows = await api.get<JobRecord[]>('/api/jobs?limit=50')
+        this.history = rows
+      } catch { /* 打开抽屉失败不致命，保留旧列表 */ }
+    },
+
+    /** 打开抽屉时标记已读；返回未读数（之前的） */
+    unreadFailedCount(): number {
+      let seenAt = 0
+      try { seenAt = Number(localStorage.getItem(TASKS_SEEN_KEY) || 0) } catch { /* 忽略 */ }
+      return this.history.filter((r) =>
+        (r.status === 'failed' || r.status === 'interrupted')
+        && Date.parse(r.created_at || '') > seenAt).length
+    },
+
+    markTasksSeen() {
+      try { localStorage.setItem(TASKS_SEEN_KEY, String(Date.now())) } catch { /* 忽略 */ }
+    },
     /** 应用启动时：拉取活跃任务并接管（刷新恢复入口）。
      *  只接管真正在跑/等输入的——interrupted 是历史终态，不弹窗。
      *  一般任务刷新后不自动打开对话框，由顶栏任务列表手动找回；

@@ -3,7 +3,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { NAlert, NButton, NModal, NScrollbar, NSpace, NTag, useMessage } from 'naive-ui'
 import { useJobsStore, type JobView } from '../stores/jobs'
-import { toastError, copyWithFeedback } from '../api/client'
+import { toastError } from '../api/client'
+import ErrorCard from './ErrorCard.vue'
 import ProgressLine from './ProgressLine.vue'
 
 const props = defineProps<{ job: JobView }>()
@@ -84,10 +85,7 @@ watch(isTerminal, (v) => { if (v) emit('finished', props.job) })
         自动重试处理请求失败、漏译和校验错误，不能保证发现所有人名误译。
       </n-alert>
 
-      <n-alert v-if="job.error" type="error" title="任务失败">
-        <pre style="white-space: pre-wrap; font-size: 12px; max-height: 200px; overflow: auto; margin: 0">{{ job.error }}</pre>
-        <n-button size="tiny" style="margin-top: 6px" @click="copyWithFeedback(message, job.error!)">复制错误信息</n-button>
-      </n-alert>
+      <error-card v-if="job.error" :job="job" @handled="onClose" />
 
       <n-alert v-if="job.status === 'interrupted'" type="warning" title="服务重启导致任务中断">
         可重新发起同一操作——翻译类任务会自动跳过已完成部分继续。

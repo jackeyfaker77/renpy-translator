@@ -3,7 +3,7 @@
 import { computed, h, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NLayout, NLayoutHeader, NLayoutSider, NLayoutContent, NMenu, NModal,
+  NBadge, NLayout, NLayoutHeader, NLayoutSider, NLayoutContent, NMenu, NModal,
   NSwitch, NTag, NButton, NDropdown, NEllipsis, NSpace, NText, useMessage,
 } from 'naive-ui'
 import type { DropdownOption, MenuOption } from 'naive-ui'
@@ -12,6 +12,7 @@ import { useProjectsStore } from './stores/projects'
 import { useJobsStore, type JobView } from './stores/jobs'
 import { useUploadsStore } from './stores/uploads'
 import JobProgressDialog from './components/JobProgressDialog.vue'
+import JobsDrawer from './components/JobsDrawer.vue'
 import UploadProgressDialog from './components/UploadProgressDialog.vue'
 import EmbeddedReviewDialog from './components/EmbeddedReviewDialog.vue'
 import { api, toastError } from './api/client'
@@ -128,32 +129,46 @@ async function onProjectMenuSelect(key: string) {
 const dialogJobs = computed(() =>
   [...jobsStore.jobs.values()].filter((j) => j.dialogOpen))
 
-/** 后台活跃任务：关掉进度对话框后从顶栏任务列表找回 */
-const backgroundJobs = computed(() =>
-  jobsStore.activeJobs.filter((j) => !j.dialogOpen))
+// ---- 任务中心（状态栏 + 铃铛 + 抽屉） ----
+const jobsDrawerOpen = ref(false)
 
-/** 后台上传任务（zip 传输阶段）：与服务端任务同列展示 */
-const backgroundUploads = computed(() => uploadsStore.backgroundTasks)
+/** 状态栏「现在正在发生什么」：等待确认 > 运行摘要 > 就绪 */
+const waitingJobs = computed(() => jobsStore.waitingJobs)
+const failedInView = computed(() => jobsStore.failedInView)
+const activeCount = computed(() =>
+  jobsStore.activeJobs.length + uploadsStore.backgroundTasks.length)
 
-const taskMenuOptions = computed(() => [
-  ...backgroundUploads.value.map((t) => ({
-    key: 'up:' + t.id,
-    label: `${t.label} ${Math.round(t.pct * 100)}%`,
-  })),
-  ...backgroundJobs.value.map((j) => ({
-    key: j.id,
-    label: j.status === 'waiting_input'
-      ? `${j.label || '任务'} — 等待确认`
-      : `${j.label || '任务'} ${Math.round(j.progress * 100)}%`,
-  })),
-])
+const runningSummary = computed(() => {
+  const j = jobsStore.activeJobs.find((x) => x.status === 'running')
+  if (!j) return ''
+  return `${j.label || '任务'} ${Math.round(j.progress * 100)}%${j.stage ? ' · ' + j.stage : ''}`
+})
 
-function openFromList(key: string) {
-  if (key.startsWith('up:')) {
-    uploadsStore.openDialog(key.slice(3))
-    return
+/** 铃铛徽标：等待确认/本会话失败（红），无则不显示 */
+const bellBadge = computed(() => {
+  if (waitingJobs.value.length) return waitingJobs.value.length
+  return failedInView.value.length
+})
+
+function openJobsDrawer() {
+  jobsDrawerOpen.value = true
+}
+
+function openFirstWaiting() {
+  const j = waitingJobs.value[0]
+  if (j) jobsStore.openDialog(j.id)
+  else jobsDrawerOpen.value = true
+}
+
+function onOpenJobsEvent() {
+  jobsDrawerOpen.value = true
+}
+
+function onDrawerKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
+    e.preventDefault()
+    jobsDrawerOpen.value = !jobsDrawerOpen.value
   }
-  jobsStore.openDialog(key)
 }
 
 async function onProjectChange(name: string | null) {
@@ -304,6 +319,10 @@ onMounted(async () => {
   // 看门狗提示（服务异常死亡）：仅提示，不关窗
   window.addEventListener('rt-server-lost', () => { serverDown.value = true })
 
+  // 任务中心入口：toast「查看任务」与 Ctrl+J
+  window.addEventListener('keydown', onDrawerKeydown)
+  window.addEventListener('rt:open-jobs', onOpenJobsEvent)
+
   heartbeatTimer = setInterval(heartbeat, 5000)
   await session.refresh()
   await projectsStore.refresh()
@@ -326,6 +345,8 @@ onMounted(async () => {
 onUnmounted(() => {
   clearInterval(heartbeatTimer)
   appEvents?.close()
+  window.removeEventListener('keydown', onDrawerKeydown)
+  window.removeEventListener('rt:open-jobs', onOpenJobsEvent)
 })
 </script>
 
@@ -351,17 +372,10 @@ onUnmounted(() => {
         未配置模型 · 去配置
       </n-tag>
       <span style="flex: 1" />
-      <!-- 后台任务列表：进度对话框被关闭后任务仍在跑，点列表项重开对应对话框 -->
-      <n-dropdown
-        v-if="backgroundJobs.length || backgroundUploads.length"
-        trigger="click" placement="bottom-end"
-        :options="taskMenuOptions"
-        @select="openFromList"
-      >
-        <n-button size="tiny" quaternary type="info">
-          ⏳ 后台任务 {{ backgroundJobs.length + backgroundUploads.length }}
-        </n-button>
-      </n-dropdown>
+      <!-- 铃铛：入口常驻（才能被学会），徽标=等待确认/失败数 -->
+      <n-badge :value="bellBadge" :max="99" :show="bellBadge > 0" type="error">
+        <n-button size="tiny" quaternary @click="openJobsDrawer">任务中心</n-button>
+      </n-badge>
       <!-- 帮助/关于：低频维护不再占黄金位 -->
       <n-dropdown trigger="click" placement="bottom-end"
                   :options="helpMenuOptions" @select="onHelpMenuSelect">
@@ -376,13 +390,43 @@ onUnmounted(() => {
           @update:value="onMenu"
         />
       </n-layout-sider>
-      <n-layout-content content-style="padding: 16px">
+      <n-layout-content content-style="padding: 16px; padding-bottom: 40px">
         <!-- key=path+项目：/strings 与 /dialogue 共用 TextsPage 组件，
              不加 key 切换路由时组件实例被复用，表格不会重新加载；
              同理，切换当前项目后页面也必须重挂载以加载新项目数据 -->
         <router-view :key="$route.path + '|' + session.currentProject" />
       </n-layout-content>
     </n-layout>
+
+    <!-- 底部状态栏：全局「现在正在发生什么」（详情进任务中心） -->
+    <div class="status-bar">
+      <n-space align="center" size="small" wrap>
+        <template v-if="waitingJobs.length">
+          <n-button size="tiny" quaternary type="warning" @click="openFirstWaiting">
+            ⚠ {{ waitingJobs.length }} 个任务等待确认
+          </n-button>
+        </template>
+        <template v-else-if="activeCount">
+          <n-tag size="tiny" type="info">{{ activeCount }} 进行中</n-tag>
+          <n-text depth="3" style="font-size: 12px">{{ runningSummary || '后台运行中' }}</n-text>
+        </template>
+        <n-text v-else depth="3" style="font-size: 12px">就绪</n-text>
+        <n-button v-if="failedInView.length" size="tiny" quaternary
+                  style="color: #e88080" @click="openJobsDrawer">
+          {{ failedInView.length }} 个任务失败
+        </n-button>
+        <n-button v-if="session.interruptedJobs" size="tiny" quaternary
+                  style="color: #f2c97d" @click="openJobsDrawer">
+          {{ session.interruptedJobs }} 个任务被中断
+        </n-button>
+      </n-space>
+      <span style="flex: 1" />
+      <n-text depth="3" style="font-size: 11px">Ctrl+J</n-text>
+      <n-button size="tiny" quaternary @click="openJobsDrawer">任务中心</n-button>
+    </div>
+
+    <!-- 任务中心抽屉 -->
+    <jobs-drawer v-model:show="jobsDrawerOpen" />
   </n-layout>
 
   <!-- 自动重启遮罩（迁移后清理占用文件）：服务恢复后自动刷新页面 -->
@@ -482,3 +526,22 @@ onUnmounted(() => {
     </template>
   </job-progress-dialog>
 </template>
+
+<style scoped>
+/* 底部状态栏：常驻 26px，全局「现在正在发生什么」 */
+.status-bar {
+  position: fixed;
+  left: 180px;
+  right: 0;
+  bottom: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+  background: var(--n-color, #18181c);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 200;
+}
+</style>
