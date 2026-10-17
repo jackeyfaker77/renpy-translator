@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, zhCN, dateZhCN } from 'naive-ui'
+import { NConfigProvider, NGlobalStyle, NMessageProvider, NDialogProvider, darkTheme, zhCN, dateZhCN } from 'naive-ui'
 import AppInner from './AppInner.vue'
+import { overrides } from './theme/overrides'
 </script>
 
 <template>
-  <n-config-provider :theme="darkTheme" :locale="zhCN" :date-locale="dateZhCN">
+  <n-config-provider :theme="darkTheme" :theme-overrides="overrides"
+                     :locale="zhCN" :date-locale="dateZhCN">
+    <n-global-style />
     <n-message-provider>
       <n-dialog-provider>
         <app-inner />
@@ -35,6 +38,12 @@ import AppInner from './AppInner.vue'
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* 键盘焦点环（= tokens.ts 的 t.focus，全局唯一焦点表达） */
+:focus-visible {
+  outline: 2px solid rgba(99, 226, 183, 0.45);
+  outline-offset: 1px;
 }
 
 /* 模态框长列表统一约定：
