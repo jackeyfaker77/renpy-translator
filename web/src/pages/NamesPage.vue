@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** 人名翻译页：翻译+分析融合流程 */
 import { computed, h, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NButton, NDataTable, NEmpty, NInput, NInputGroup, NModal, NPopconfirm,
   NSelect, NSpace, NTag, NText, useMessage,
@@ -13,11 +14,13 @@ import ExportTextsDialog from '../components/ExportTextsDialog.vue'
 import ImportFromProjectDialog from '../components/ImportFromProjectDialog.vue'
 import ImportTextsDialog from '../components/ImportTextsDialog.vue'
 import PageHeader from '../components/PageHeader.vue'
+import ContextHint from '../components/ContextHint.vue'
 import { useInlineEdit } from '../composables/useInlineEdit'
 import { useJobTask } from '../composables/useJobTask'
 import { useSessionStore } from '../stores/session'
 
 const message = useMessage()
+const router = useRouter()
 const session = useSessionStore()
 const { runJob } = useJobTask()
 
@@ -109,6 +112,10 @@ async function onCommit(row: NameRow) {
 type RunMode = 'both' | 'name' | 'analyze'
 
 async function runOne(row: NameRow, mode: RunMode) {
+  if (!session.hasTranslator) {
+    void router.push('/settings?new=1')
+    return
+  }
   processing.value.add(rowKey(row))
   try {
     const data = await api.post<{ cn_name: string; profile: object }>(
@@ -155,6 +162,11 @@ async function keepOriginal(row: NameRow) {
 }
 
 async function translateAll(mode: RunMode) {
+  // 模型门禁：没配模型不发请求，点击去配置
+  if (!session.hasTranslator) {
+    void router.push('/settings?new=1')
+    return
+  }
   await runJob(
     () => api.post('/api/current/names/translate-all', { mode }),
     () => load())
@@ -267,20 +279,21 @@ const columns: DataTableColumns<NameRow> = [
       // 主操作：译名+画像一次出（名字带台词上下文，质量高于单独盲译）
       h(NButton, {
         size: 'tiny', type: 'primary', quaternary: true,
-        disabled: !r.original && !r.variable,
+        disabled: (!r.original && !r.variable) || !session.hasTranslator,
         loading: processing.value.has(rowKey(r)),
         onClick: () => runOne(r, 'both'),
       }, () => '翻译+分析'),
       // 仅分析：保留原名玩家/人工定名后补画像（不动人名）
       h(NButton, {
         size: 'tiny', quaternary: true,
+        disabled: !session.hasTranslator,
         loading: processing.value.has(rowKey(r)),
         onClick: () => runOne(r, 'analyze'),
       }, () => '仅分析'),
       // 重译名：画像已好只换名字（不重跑分析）
       h(NButton, {
         size: 'tiny', quaternary: true,
-        disabled: !r.original,
+        disabled: !r.original || !session.hasTranslator,
         loading: processing.value.has(rowKey(r)),
         onClick: () => runOne(r, 'name'),
       }, () => '重译名'),
@@ -305,10 +318,12 @@ onMounted(load)
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px">
       <page-header title="人名与角色" help-section="3,7" />
-      <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)" @click="translateAll('both')">
+      <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)"
+                :disabled="!session.hasTranslator" @click="translateAll('both')">
         全部翻译+分析
       </n-button>
-      <n-button size="small" @click="translateAll('analyze')">全部分析</n-button>
+      <n-button size="small" :disabled="!session.hasTranslator"
+                @click="translateAll('analyze')">全部分析</n-button>
       <n-popconfirm @positive-click="keepOriginalAll">
         <template #trigger>
           <n-button size="small" quaternary :loading="keepAllLoading">全部保留原名</n-button>
@@ -324,6 +339,12 @@ onMounted(load)
         {{ stats.total }} 人名，翻译 {{ stats.translated }}，分析 {{ stats.analyzed }}
       </n-text>
     </n-space>
+
+    <context-hint
+      v-if="stats.total && stats.translated < stats.total"
+      storage-key="rt.hint.names.first"
+      text="先翻译主要角色即可开始对话翻译，不必等全部角色完成——人名会注入之后所有翻译。"
+    />
 
     <n-space align="center" style="margin-bottom: 10px" wrap>
       <n-input-group style="width: 280px">

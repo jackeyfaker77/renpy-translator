@@ -8,6 +8,7 @@ import { renderIcon } from '../components/icons'
 import MarkupIssuesDialog from '../components/MarkupIssuesDialog.vue'
 import ProgressLine from '../components/ProgressLine.vue'
 import PageHeader from '../components/PageHeader.vue'
+import ContextHint from '../components/ContextHint.vue'
 import { useJobsStore } from '../stores/jobs'
 import { useSessionStore } from '../stores/session'
 
@@ -99,6 +100,12 @@ onMounted(load)
     <n-text depth="3" style="font-size: 12px">
       导出为 {{ session.currentProject }}-translated.zip（与项目包同目录），解压即可运行
     </n-text>
+
+    <context-hint
+      v-if="untranslated > 0"
+      storage-key="rt.hint.export.untranslated"
+      :text="`还有 ${untranslated} 条未翻译；导出包中这些将保留原文。可回「对话翻译」用搜索筛「未翻译」继续。`"
+    />
 
     <n-card size="small" style="margin: 16px 0" v-if="info">
       <n-space vertical>

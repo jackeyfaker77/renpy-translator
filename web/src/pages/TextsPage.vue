@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /** 文本翻译页（UI 字符串 / 对话共用，contentType 区分） */
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NButton, NCard, NCheckbox, NDataTable, NDropdown, NEmpty, NInput, NModal,
-  NPagination, NPopconfirm, NSelect, NSpace, NSwitch, NText, NInputGroup,
-  useDialog, useMessage,
+  NPagination, NPopconfirm, NSelect, NSpace, NSwitch, NText, NTooltip,
+  NInputGroup, useDialog, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns, DataTableSortState } from 'naive-ui'
 import { BookOutline, CodeSlashOutline, DownloadOutline, LanguageOutline, LocateOutline, RefreshOutline, ShareOutline, SparklesOutline, WarningOutline } from '@vicons/ionicons5'
@@ -15,11 +16,13 @@ import FailedBatchesDialog from '../components/FailedBatchesDialog.vue'
 import ImportFromProjectDialog from '../components/ImportFromProjectDialog.vue'
 import ImportTextsDialog from '../components/ImportTextsDialog.vue'
 import PageHeader from '../components/PageHeader.vue'
+import ContextHint from '../components/ContextHint.vue'
 import { useJobTask } from '../composables/useJobTask'
 import { useSessionStore } from '../stores/session'
 
 const props = defineProps<{ contentType: 'ui' | 'dialogue' }>()
 const message = useMessage()
+const router = useRouter()
 const session = useSessionStore()
 const { runJob } = useJobTask()
 
@@ -380,6 +383,7 @@ function sortOrderOf(key: string): 'ascend' | 'descend' | false {
 
 // ---- 单条翻译 ----
 async function translateOne(row: Row) {
+  if (!ensureModel()) return
   translatingIds.value.add(row.id)
   try {
     const data = await api.post<{ translated_text: string }>(
@@ -400,7 +404,15 @@ async function onTranslateJobDone() {
   if (failedBatchCount.value > 0) failedDialogVisible.value = true
 }
 
+// ---- 模型门禁：没配模型的翻译动作一律不发请求，点击去配置 ----
+function ensureModel(): boolean {
+  if (session.hasTranslator) return true
+  void router.push('/settings?new=1')
+  return false
+}
+
 async function translatePage() {
+  if (!ensureModel()) return
   await runJob(
     () => api.post(`/api/current/texts/${props.contentType}/translate-page`, { ...query }),
     onTranslateJobDone,
@@ -423,6 +435,7 @@ const translateMenuOptions = computed(() => [
 ])
 
 function confirmTranslate(title: string, content: string, request: () => Promise<{ job_id: string | null; message?: string }>, emptyMessage: string) {
+  if (!ensureModel()) return
   dialog.warning({
     title,
     content,
@@ -454,6 +467,7 @@ function onTranslateMenu(key: string) {
 }
 
 async function startRoleTranslate() {
+  if (!ensureModel()) return
   if (!rolePick.value) {
     message.warning('请选择角色')
     return
@@ -571,6 +585,7 @@ const columns = computed<DataTableColumns<Row>>(() => {
       h(NButton, {
         size: 'tiny', type: 'primary', quaternary: true,
         loading: translatingIds.value.has(r.id),
+        disabled: !session.hasTranslator,
         onClick: () => translateOne(r),
       }, () => 'AI翻译'),
       h(NButton, {
@@ -606,10 +621,21 @@ watch(() => [query.filter_mode, query.character], () => {
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px" wrap>
       <page-header :title="title" :help-section="isDialogue ? '5,7' : '4,7'" />
-      <n-dropdown :options="translateMenuOptions" @select="onTranslateMenu">
+      <n-tooltip v-if="!session.hasTranslator" trigger="hover">
+        <template #trigger>
+          <n-button size="small" type="warning"
+                    :render-icon="renderIcon(LanguageOutline)"
+                    @click="router.push('/settings?new=1')">
+            全部翻译 ▾
+          </n-button>
+        </template>
+        还没配置模型，点击去配置（翻译质量与成本都由模型决定）
+      </n-tooltip>
+      <n-dropdown v-else :options="translateMenuOptions" @select="onTranslateMenu">
         <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)">全部翻译 ▾</n-button>
       </n-dropdown>
-      <n-button size="small" @click="translatePage">翻译本页</n-button>
+      <n-button size="small" :disabled="!session.hasTranslator"
+                @click="translatePage">翻译本页</n-button>
       <n-button size="small" @click="replacePreview = null; replaceVisible = true">查找并替换译文</n-button>
       <n-button size="small" :render-icon="renderIcon(ShareOutline)" @click="openExport">导出</n-button>
       <n-button size="small" :render-icon="renderIcon(DownloadOutline)" @click="openImport">导入</n-button>
@@ -627,6 +653,12 @@ watch(() => [query.filter_mode, query.character], () => {
     <n-text v-if="isDialogue" depth="3" style="display: block; margin-bottom: 10px; font-size: 12px">
       人名和角色分析可逐步补充，不必全员完成即可翻译；建议先设定主要角色的译名，减少人名不一致。
     </n-text>
+
+    <context-hint
+      v-if="isDialogue && session.hasTranslator && (session.stats.dialogue?.untranslated ?? 0) > 0"
+      storage-key="rt.hint.dialogue.trial"
+      text="建议先「翻译指定角色」或试译 10 条确认效果，再用「全部翻译」批量推进——先花几分钱验证，避免一次性大量消耗。"
+    />
 
     <n-space align="center" style="margin-bottom: 10px" wrap>
       <n-text depth="3" style="font-size: 12px">翻译模式</n-text>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NCard, NEmpty, NInput, NInputGroup, NModal, NPopconfirm,
   NRadioButton, NRadioGroup, NSpace, NTag, NText,
@@ -16,10 +17,13 @@ import { nativeReady, pickDirectory } from '../api/native'
 import FileDropSelect from '../components/FileDropSelect.vue'
 import ProgressLine from '../components/ProgressLine.vue'
 import PageHelp from '../components/PageHelp.vue'
+import SetupChecklist from '../components/SetupChecklist.vue'
 import UpdateReportDialog from '../components/UpdateReportDialog.vue'
 
 
 const message = useMessage()
+const route = useRoute()
+const router = useRouter()
 const session = useSessionStore()
 const store = useProjectsStore()
 const jobsStore = useJobsStore()
@@ -208,6 +212,8 @@ watch(
             await session.open(name)
             await store.refresh()
             toastOk(message, `项目 "${name}" 创建成功！`)
+            // 建项即进入下一步：落到概览（检查单/下一步卡）
+            void router.push('/overview')
           } catch (e) {
             toastError(message, e)
           }
@@ -303,6 +309,41 @@ onMounted(async () => {
   await store.refresh()
   for (const p of store.list) await loadPackages(p.name)
 })
+
+// 顶栏项目菜单的「新建/导入…」经 ?dialog=create|import 触发本页弹窗
+watch(() => route.query.dialog, (v) => {
+  if (v === 'create') openCreate()
+  else if (v === 'import') importVisible.value = true
+  if (v) void router.replace({ query: {} })
+}, { immediate: true })
+
+// ---- 首启空态（两步引导，可收起） ----
+const firstRunDismissed = ref(
+  (() => { try { return localStorage.getItem('rt.onboarding.firstRun.dismissed') === '1' } catch { return false } })())
+const firstRunItems = computed(() => [
+  {
+    key: 'model', title: '配置 AI 模型',
+    desc: 'DeepSeek / GPT / Claude 等，填 API Key 即可（约 2 分钟）',
+    done: session.hasTranslator,
+  },
+  {
+    key: 'project', title: '新建项目',
+    desc: '选择游戏文件夹或上传 zip，自动解包、反编译；已有项目包可「导入项目」',
+    done: false,
+  },
+])
+const firstRunStep = computed(() => (session.hasTranslator ? 'project' : 'model'))
+const firstRunCta = computed(() => (firstRunStep.value === 'model' ? '配置模型' : '新建项目'))
+
+function onFirstRunAction(key: string) {
+  if (key === 'model') void router.push('/settings?new=1')
+  else openCreate()
+}
+
+function dismissFirstRun() {
+  firstRunDismissed.value = true
+  try { localStorage.setItem('rt.onboarding.firstRun.dismissed', '1') } catch { /* 忽略 */ }
+}
 </script>
 
 <template>
@@ -315,7 +356,14 @@ onMounted(async () => {
       <n-button size="small" quaternary :render-icon="renderIcon(RefreshOutline)" @click="store.refresh()">刷新</n-button>
     </n-space>
 
-    <n-empty v-if="!store.list.length" description="暂无项目" style="margin-top: 60px" />
+    <div v-if="!store.list.length" style="margin-top: 40px; max-width: 560px">
+      <n-empty v-if="firstRunDismissed" description="暂无项目" />
+      <setup-checklist
+        v-else :items="firstRunItems" :current-key="firstRunStep"
+        :current-cta="firstRunCta" @action="onFirstRunAction"
+        @dismiss="dismissFirstRun"
+      />
+    </div>
 
     <n-card v-for="p in store.list" :key="p.name" size="small" style="margin-bottom: 10px">
       <n-space align="center" justify="space-between">
