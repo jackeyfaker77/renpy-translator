@@ -22,11 +22,12 @@ defineProps<{
 </template>
 
 <style scoped>
+/* 不带 margin-bottom：页头常内嵌在工具栏 n-space 行里（align="center"），
+   自带下边距会把标题顶得比按钮高、视觉不平齐；页面自己控行距 */
 .page-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 12px;
   flex-wrap: wrap;
 }
 </style>

@@ -162,6 +162,8 @@ class AppState:
         self.interrupted_count = n
         if n:
             self.logger.info(f'检测到 {n} 个被中断的任务（上次服务退出时未结束）')
+        # 诊断轨迹跨重启恢复：api.log.jsonl → 内存 deque
+        await loop.run_in_executor(None, self._hydrate_api_log)
         last = await loop.run_in_executor(
             None, self.app_db.get_setting, 'current_project', '')
         if last and self.project_manager.project_exists(last):
@@ -746,7 +748,7 @@ class AppState:
 
         with self._api_log_lock:
             self._api_log_seq += 1
-            self.api_log_entries.append({
+            record = {
                 'id': self._api_log_seq,
                 'ts': timestamp,
                 'duration_ms': meta.get('duration_ms', 0),
@@ -758,7 +760,21 @@ class AppState:
                 'usage': usage or {},
                 'request': _api_json_safe(request_body),
                 'response': _api_json_safe(response_body),
-            })
+            }
+            self.api_log_entries.append(record)
+
+        # 结构化侧车（JSONL）：跨重启恢复诊断轨迹用（人读版 api.log 不回灌）
+        jsonl_path = self.root / 'logs' / 'api.log.jsonl'
+        with self._api_log_lock:
+            try:
+                jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+                if (jsonl_path.exists()
+                        and jsonl_path.stat().st_size > self._API_LOG_MAX_BYTES):
+                    jsonl_path.replace(jsonl_path.with_name(jsonl_path.name + '.1'))
+                with open(jsonl_path, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + '\n')
+            except OSError:
+                pass
 
         label = _API_TYPE_LABELS.get(task_type, task_type or '其他')
         entry = (
@@ -780,6 +796,40 @@ class AppState:
                     f.write(entry)
             except OSError as e:
                 print(f'[API日志] 写入失败: {e}')
+
+    def _hydrate_api_log(self):
+        """启动时从 api.log.jsonl 恢复最近条目到内存（诊断页跨重启可查历史）"""
+        import json
+        path = self.root / 'logs' / 'api.log.jsonl'
+        if not path.exists():
+            return
+        try:
+            size = path.stat().st_size
+            with open(path, 'rb') as f:
+                if size > 1_500_000:
+                    f.seek(size - 1_500_000)
+                    f.readline()  # 丢弃开头的半行
+                raw = f.read().decode('utf-8', errors='ignore')
+            entries = []
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except ValueError:
+                    continue
+            entries = entries[-self.api_log_entries.maxlen:]
+            with self._api_log_lock:
+                for e in entries:
+                    self.api_log_entries.append(e)
+                    if isinstance(e.get('id'), int) and e['id'] > self._api_log_seq:
+                        self._api_log_seq = e['id']
+            if entries:
+                self.logger.info(
+                    f'已从 api.log.jsonl 恢复 {len(entries)} 条 API 调用记录')
+        except OSError as e:
+            self.logger.warning(f'API 日志恢复失败: {e}')
 
     def get_api_log_entries(self, limit: int = 50, task_type: str = '',
                             before_id: int = 0) -> dict:
