@@ -252,10 +252,14 @@ async def fire(state, task: dict) -> dict:
             task['id'], last_status=f'启动失败: {e}',
             last_fired_at=datetime.now().isoformat(timespec='seconds'))
         return {'error': str(e)}
-    finally:
-        rt.close()
-
+    # 注意：任务创建成功时不能在此关闭 rt——任务体在后台继续使用
+    # db/翻译服务线程池（提前 close 会报 cannot schedule new futures
+    # after shutdown）。终结后由 schedule_tick 统一释放。
     job_id = (result or {}).get('job_id')
+    if job_id:
+        state._scheduled_runtimes[job_id] = rt
+    else:
+        rt.close()
     state.app_db.update_scheduled_task(
         task['id'], last_job_id=job_id or '', last_status='已触发',
         last_fired_at=datetime.now().isoformat(timespec='seconds'))
@@ -264,6 +268,15 @@ async def fire(state, task: dict) -> dict:
 
 async def schedule_tick(state) -> None:
     """调度主循环单次扫描（默认 30s 一次；不并发、不补跑）"""
+    # 释放已终结任务的项目运行时（db/翻译服务线程池随任务生命周期）
+    terminal = ('succeeded', 'failed', 'cancelled', 'interrupted')
+    for jid, rt in list(state._scheduled_runtimes.items()):
+        rec = state.app_db.get_job(jid)
+        if rec is None or rec['status'] in terminal:
+            try:
+                rt.close()
+            finally:
+                state._scheduled_runtimes.pop(jid, None)
     now = datetime.now()
     tasks = state.app_db.list_scheduled_tasks(enabled_only=True)
     for t in tasks:

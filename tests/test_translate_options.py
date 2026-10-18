@@ -71,6 +71,24 @@ class _CaptureTranslator:
         terms = [{'en_term': 'Kingdom', 'cn_term': '王国'}] if content_type != 'ui' else []
         return ({i: f'译文{i}' for i in range(len(items))}, terms, {}, {})
 
+    def translate_text(self, text='', character='', context_before=None,
+                       context_after=None, glossary_text='',
+                       character_profile='', style_guide='',
+                       characters_text='', debug=False):
+        self.calls.append({
+            'glossary_text': glossary_text, 'characters_text': characters_text,
+            'single': 'dialogue',
+        })
+        return '单译', []
+
+    def translate_ui(self, text='', glossary_text='', character_dict=None,
+                     style_guide='', characters_text='', debug=False):
+        self.calls.append({
+            'glossary_text': glossary_text, 'characters_text': characters_text,
+            'single': 'ui',
+        })
+        return '单译', []
+
 
 class _NullLogger:
     def info(self, *a, **k):
@@ -210,3 +228,66 @@ def test_names_flag_off_drops_characters_text(db):
         svc.close()
     assert tr.calls[0]['characters_text'] == ''
     assert tr.calls[0]['glossary_text'] == ''
+
+
+def test_fallback_full_injection_when_all_match(db):
+    """命中率≥95% 回退全量注入：以 db.get_glossary_for_prompt 被调用为证"""
+    db.upsert_glossary_batch([('Dragon', '巨龙')])
+    db.set_meta('translate_options', options_from_preset('deep').to_json())
+    tr = _CaptureTranslator()
+    svc = _service(db, tr)
+    full_text = ' '.join(db.UI_GLOSSARY.keys()) + ' Kingdom Dragon'
+    calls = []
+    orig = db.get_glossary_for_prompt
+    db.get_glossary_for_prompt = lambda: (calls.append(1), orig())[1]
+    try:
+        _run(svc.translate_batch(
+            [{'id': 1, 'original_text': full_text, 'character': 'a',
+              'translated_text': ''}], 'dialogue'))
+    finally:
+        svc.close()
+    assert calls, '全部命中时应走全量注入回退'
+    assert '巨龙' in tr.calls[0]['glossary_text']
+
+
+def test_ui_terms_in_ui_section_not_game(db):
+    """UI 翻译提取的术语（term_type=ui）匹配后只进 UI 分节，不混入游戏术语"""
+    db._conn.execute(
+        "INSERT INTO glossary(en_term,cn_term,term_type,source) "
+        "VALUES('Dungeon Flag','地牢旗帜','ui','ai')")
+    db._conn.commit()
+    db.upsert_glossary_batch([('Kingdom', '王国')])
+    db.set_meta('translate_options', options_from_preset('deep').to_json())
+    tr = _CaptureTranslator()
+    svc = _service(db, tr)
+    try:
+        _run(svc.translate_batch(
+            [{'id': 1, 'original_text': 'Dungeon Flag in the Kingdom.',
+              'character': 'a', 'translated_text': ''}], 'dialogue'))
+    finally:
+        svc.close()
+    gt = tr.calls[0]['glossary_text']
+    assert gt.count('Dungeon Flag') == 1          # 只出现一次（UI 分节）
+    assert '地牢旗帜' in gt and '王国' in gt
+    # UI 词条位于游戏术语分节之前
+    assert gt.index('Dungeon Flag') < gt.index('【游戏术语】')
+
+
+def test_single_translation_matched_injection(db):
+    """单条翻译同样按本句+说话人匹配注入（人名直通、未命中术语不注入）"""
+    db.insert_characters([
+        {'variable': 'a', 'display_name': 'Alice', 'cn_name': '爱丽丝'},
+    ])
+    db.upsert_glossary_batch([('Dragon', '巨龙')])
+    db.set_meta('translate_options', options_from_preset('deep').to_json())
+    tr = _CaptureTranslator()
+    svc = _service(db, tr)
+    try:
+        _run(svc.translate_single(1, 'dialogue', 'Kingdom attack Alice now.', 'a'))
+    finally:
+        svc.close()
+    call = tr.calls[0]
+    assert call.get('single') == 'dialogue'
+    assert '王国' in call['glossary_text']
+    assert '巨龙' not in call['glossary_text']   # 本句未出现的术语不注入
+    assert '爱丽丝' in call['characters_text']    # 说话人直通

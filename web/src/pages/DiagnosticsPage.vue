@@ -66,6 +66,9 @@ const filtered = computed(() => taskFilter.value
   ? entries.value.filter((e) => e.task_type === taskFilter.value)
   : entries.value)
 
+/** 列表倒序展示：最新在最上（后端按时间正序返回，翻页向更旧追加在尾部） */
+const listRows = computed(() => [...filtered.value].reverse())
+
 async function refresh(selectNewest = false) {
   loading.value = true
   try {
@@ -250,7 +253,7 @@ onUnmounted(() => {
           <span class="c-dur">耗时</span>
           <span class="c-preview">输入预览</span>
         </div>
-        <div v-for="e in filtered" :key="e.id" class="row"
+        <div v-for="e in listRows" :key="e.id" class="row"
              :class="{ active: e.id === selectedId }" @click="pickRow(e.id)">
           <span class="c-time">{{ e.ts.slice(11) }}</span>
           <span class="c-status">
@@ -398,8 +401,6 @@ onUnmounted(() => {
   border: 1px solid var(--n-border-color, var(--rt-border));
   border-radius: 6px;
   padding: 10px;
-  max-height: 72vh;
-  overflow: auto;
 }
 .section {
   margin-bottom: 12px;

@@ -128,10 +128,12 @@ class TranslationService:
         # ---- 术语表（静态 UI 参考译表 + 库内词条，同格式分节） ----
         glossary_text = ''
         db_rows = self.db.get_glossary_rows_for_prompt()
+        # 静态表已有的英文不重复注入（静态条目随后统一进 UI 分节）
+        static_keys = set(self.db.UI_GLOSSARY)
         all_entries = (
             [{'ui': True, 'en': en, 'cn': cn} for en, cn in self.db.UI_GLOSSARY.items()]
-            + [{'ui': False, 'en': r['en_term'], 'cn': r['cn_term']}
-               for r in db_rows])
+            + [{'ui': r.get('term_type') == 'ui', 'en': r['en_term'], 'cn': r['cn_term']}
+               for r in db_rows if r['en_term'] not in static_keys])
         hits = match_entries(texts, all_entries)
         if len(hits) >= len(all_entries) * 0.95:
             glossary_text = self.db.get_glossary_for_prompt()

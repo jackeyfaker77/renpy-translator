@@ -141,6 +141,7 @@ class AppState:
         self.db_lock = asyncio.Lock()
         self.interrupted_count = 0    # 启动时标记的中断任务数（前端汇总提示用）
         self._sched_task = None       # 定时任务调度循环（startup 创建）
+        self._scheduled_runtimes = {}  # 定时任务项目运行时（job_id → ProjectRuntime，终态释放）
 
         # 临时文件统一进数据根/temp（系统 TEMP 删除失败会撑爆），
         # 并通过 tempfile.tempdir 覆盖所有 stdlib 临时文件落点

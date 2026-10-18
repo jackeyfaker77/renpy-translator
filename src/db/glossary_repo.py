@@ -180,7 +180,7 @@ class GlossaryRepo:
         for en, cn in self.UI_GLOSSARY.items():
             lines.append(f"  {en} → {cn}")
         for r in db_rows:
-            if r["term_type"] == "ui":
+            if r["term_type"] == "ui" and r["en_term"] not in self.UI_GLOSSARY:
                 lines.append(f"  {r['en_term']} → {r['cn_term']}")
 
         # 数据库中的游戏术语
