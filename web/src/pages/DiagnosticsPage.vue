@@ -17,7 +17,7 @@ import PageHelp from '../components/PageHelp.vue'
 interface ApiLogEntry {
   id: number
   ts: string
-  duration_ms: number
+  duration_ms: number | null
   ok: boolean
   attempt: number
   error: string
@@ -128,7 +128,7 @@ function barStyle(e: ApiLogEntry) {
   if (!span) return {}
   const t = Date.parse(e.ts.replace(' ', 'T'))
   const left = ((t - span.min) / span.span) * 100
-  const width = Math.max(0.6, (e.duration_ms / span.span) * 100)
+  const width = Math.max(0.6, ((e.duration_ms ?? 0) / span.span) * 100)
   return {
     left: `${Math.min(left, 99.4)}%`,
     width: `${width}%`,
@@ -138,7 +138,7 @@ function barStyle(e: ApiLogEntry) {
 
 function barTitle(e: ApiLogEntry) {
   return `${e.ts} · ${TASK_LABELS[e.task_type] || e.task_type}`
-      + ` · ${e.duration_ms}ms${e.ok ? '' : ' · 失败：' + e.error}`
+      + ` · ${e.duration_ms == null ? '—' : e.duration_ms + 'ms'}${e.ok ? '' : ' · 失败：' + e.error}`
 }
 
 // ---- 展示辅助 ----
@@ -261,7 +261,7 @@ onUnmounted(() => {
           </span>
           <span class="c-task">{{ taskLabel(e.task_type) }}</span>
           <span class="c-usage">{{ usageSummary(e.usage) }}</span>
-          <span class="c-dur">{{ e.duration_ms }}ms</span>
+          <span class="c-dur">{{ e.duration_ms == null ? '—' : e.duration_ms + 'ms' }}</span>
           <span class="c-preview">{{ preview(e) }}</span>
         </div>
         <n-empty v-if="!filtered.length" description="暂无调用记录" style="margin: 24px 0" />
@@ -281,7 +281,7 @@ onUnmounted(() => {
         </n-space>
         <n-text depth="3" style="display: block; font-size: 12px; margin-bottom: 8px">
           {{ selected.ts }} · {{ selected.model || selected.request?.model || '—' }}
-          · {{ selected.duration_ms }}ms · 尝试 {{ selected.attempt }} 次
+          · {{ selected.duration_ms == null ? '—' : selected.duration_ms + 'ms' }} · 尝试 {{ selected.attempt }} 次
           · {{ usageSummary(selected.usage) }}
           <template v-if="!selected.ok"> · {{ selected.error }}</template>
         </n-text>

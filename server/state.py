@@ -162,8 +162,8 @@ class AppState:
         self.interrupted_count = n
         if n:
             self.logger.info(f'检测到 {n} 个被中断的任务（上次服务退出时未结束）')
-        # 诊断轨迹跨重启恢复：api.log.jsonl → 内存 deque
-        await loop.run_in_executor(None, self._hydrate_api_log)
+        # 轨迹迁移：一次性把旧 jsonl 侧车导入 app.db（历史不丢）
+        await loop.run_in_executor(None, self._import_legacy_api_jsonl)
         last = await loop.run_in_executor(
             None, self.app_db.get_setting, 'current_project', '')
         if last and self.project_manager.project_exists(last):
@@ -724,12 +724,13 @@ class AppState:
 
     def _on_api_log(self, request_body: dict, response_body: dict,
                     task_type: str, meta: dict = None):
-        """API 日志回调：结构化 entry 进内存 deque（轨迹面板）+ 文件双写
+        """LLM 调用轨迹回调：内存 deque（快捷快照）+ app.db 持久化（主存储）
 
         门控：API_LOG 环境变量强制开 OR settings 的 api_log 开关
         （环境变量是排障总闸）。meta = {ok, duration_ms, attempt, error}，
-        失败/重试耗尽也记（响应体 {'error': ...}）。该回调在翻译线程中触发，
-        内存与文件写入都需加锁。
+        失败/重试耗尽也记（响应体 {'error': ...}）。该回调在翻译线程中触发。
+        人读文本日志（logs/api.log）仅在 API_LOG 环境变量置位时写——
+        生产默认零文件增长，轨迹历史由 app.db 承担（重启不丢、有上限裁剪）。
         """
         import json
         import os
@@ -751,7 +752,7 @@ class AppState:
             record = {
                 'id': self._api_log_seq,
                 'ts': timestamp,
-                'duration_ms': meta.get('duration_ms', 0),
+                'duration_ms': meta.get('duration_ms'),
                 'ok': bool(meta.get('ok', True)),
                 'attempt': meta.get('attempt', 1),
                 'error': meta.get('error', ''),
@@ -763,19 +764,14 @@ class AppState:
             }
             self.api_log_entries.append(record)
 
-        # 结构化侧车（JSONL）：跨重启恢复诊断轨迹用（人读版 api.log 不回灌）
-        jsonl_path = self.root / 'logs' / 'api.log.jsonl'
-        with self._api_log_lock:
-            try:
-                jsonl_path.parent.mkdir(parents=True, exist_ok=True)
-                if (jsonl_path.exists()
-                        and jsonl_path.stat().st_size > self._API_LOG_MAX_BYTES):
-                    jsonl_path.replace(jsonl_path.with_name(jsonl_path.name + '.1'))
-                with open(jsonl_path, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(record, ensure_ascii=False) + '\n')
-            except OSError:
-                pass
+        try:
+            self.app_db.insert_api_log_entry(record)
+        except Exception as e:
+            print(f'[API轨迹] 写库失败: {e}')
 
+        # 人读文本日志：仅排障（API_LOG 环境变量）时落盘
+        if not env_on:
+            return
         label = _API_TYPE_LABELS.get(task_type, task_type or '其他')
         entry = (
             f'{"=" * 70}\n'
@@ -797,59 +793,32 @@ class AppState:
             except OSError as e:
                 print(f'[API日志] 写入失败: {e}')
 
-    def _hydrate_api_log(self):
-        """启动时从 api.log.jsonl 恢复最近条目到内存（诊断页跨重启可查历史）"""
-        import json
-        path = self.root / 'logs' / 'api.log.jsonl'
-        if not path.exists():
-            return
-        try:
-            size = path.stat().st_size
-            with open(path, 'rb') as f:
-                if size > 1_500_000:
-                    f.seek(size - 1_500_000)
-                    f.readline()  # 丢弃开头的半行
-                raw = f.read().decode('utf-8', errors='ignore')
-            entries = []
-            for line in raw.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entries.append(json.loads(line))
-                except ValueError:
-                    continue
-            entries = entries[-self.api_log_entries.maxlen:]
-            with self._api_log_lock:
-                for e in entries:
-                    self.api_log_entries.append(e)
-                    if isinstance(e.get('id'), int) and e['id'] > self._api_log_seq:
-                        self._api_log_seq = e['id']
-            if entries:
-                self.logger.info(
-                    f'已从 api.log.jsonl 恢复 {len(entries)} 条 API 调用记录')
-        except OSError as e:
-            self.logger.warning(f'API 日志恢复失败: {e}')
+    def _import_legacy_api_jsonl(self):
+        """一次性把旧 jsonl 侧车导入 app.db（settings 打标防重）。
 
-    def get_api_log_entries(self, limit: int = 50, task_type: str = '',
-                            before_id: int = 0) -> dict:
-        """轨迹面板数据源：线程安全快照（复制 deque，避免迭代中被写线程修改）
-
-        before_id>0 时只取 id 更小的（向前翻页），返回按时间正序。
+        旧条目的 duration_ms 是迁移产物（文本日志无法恢复），一律置
+        NULL——前端显示为「—」，不冒充真实耗时。
         """
-        with self._api_log_lock:
-            entries = list(self.api_log_entries)
-        if task_type:
-            entries = [e for e in entries if e['task_type'] == task_type]
-        if before_id:
-            entries = [e for e in entries if e['id'] < before_id]
-        entries = entries[-max(1, limit):]
-        import os
-        env_on = bool(os.environ.get('API_LOG'))
-        setting_on = False
+        import json
         try:
-            setting_on = self.app_db.get_setting('api_log', '0') == '1'
-        except Exception:
-            pass
-        return {'entries': entries, 'enabled': env_on or setting_on,
-                'env_forced': env_on}
+            if self.app_db.get_setting('api_log_imported', '0') == '1':
+                return
+            path = self.root / 'logs' / 'api.log.jsonl'
+            if not path.exists():
+                self.app_db.set_setting('api_log_imported', '1')
+                return
+            with open(path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except ValueError:
+                        continue
+                    rec['duration_ms'] = None
+                    self.app_db.insert_api_log_entry(rec)
+            self.app_db.set_setting('api_log_imported', '1')
+            self.logger.info('已导入历史 API 轨迹（api.log.jsonl → app.db）')
+        except Exception as e:
+            self.logger.warning(f'历史 API 轨迹导入失败: {e}')

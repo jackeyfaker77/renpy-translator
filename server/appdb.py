@@ -38,6 +38,19 @@ CREATE TABLE IF NOT EXISTS job_events (
     PRIMARY KEY (job_id, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE TABLE IF NOT EXISTS api_log_entries (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            TEXT NOT NULL,
+    duration_ms   INTEGER,
+    ok            INTEGER NOT NULL DEFAULT 1,
+    attempt       INTEGER NOT NULL DEFAULT 1,
+    error         TEXT,
+    task_type     TEXT,
+    model         TEXT,
+    usage_json    TEXT,
+    request_json  TEXT,
+    response_json TEXT
+);
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
     id             TEXT PRIMARY KEY,
     name           TEXT NOT NULL,
@@ -270,3 +283,61 @@ class AppDatabase:
         d['schedule'] = json.loads(d.pop('schedule_json') or '{}')
         d['enabled'] = bool(d['enabled'])
         return d
+
+    # ---- api_log_entries（LLM 调用轨迹的生产存储） ----
+
+    # 轨迹保留上限：DB 体积上界 ≈ 单条均值 × 该值（请求体大时单条可达数十 KB）
+    API_LOG_KEEP = 500
+    # 每插入 N 条做一次裁剪（懒裁剪，避免每条都 DELETE）
+    _API_LOG_PRUNE_EVERY = 20
+
+    def insert_api_log_entry(self, record: dict) -> int:
+        """插入一条轨迹记录（duration_ms 允许为 NULL=未知）；懒裁剪保留最近 N 条"""
+        with self._lock:
+            cur = self._conn.execute(
+                'INSERT INTO api_log_entries('
+                'ts,duration_ms,ok,attempt,error,task_type,model,'
+                'usage_json,request_json,response_json) '
+                'VALUES(?,?,?,?,?,?,?,?,?,?)',
+                (record['ts'], record.get('duration_ms'),
+                 1 if record.get('ok', True) else 0,
+                 record.get('attempt', 1), record.get('error', '') or '',
+                 record.get('task_type', '') or '', record.get('model', '') or '',
+                 json.dumps(record.get('usage') or {}, ensure_ascii=False),
+                 json.dumps(record.get('request'), ensure_ascii=False),
+                 json.dumps(record.get('response'), ensure_ascii=False)))
+            if cur.lastrowid % self._API_LOG_PRUNE_EVERY == 0:
+                self._conn.execute(
+                    'DELETE FROM api_log_entries WHERE id <= ('
+                    'SELECT id FROM api_log_entries ORDER BY id DESC '
+                    'LIMIT 1 OFFSET ?)',
+                    (self.API_LOG_KEEP,))
+            self._conn.commit()
+            return cur.lastrowid
+
+    def list_api_log_entries(self, limit: int = 50, task_type: str = '',
+                             before_id: int = 0) -> list:
+        """轨迹列表（时间正序）；task_type 过滤、before_id 向前翻页"""
+        sql = 'SELECT * FROM api_log_entries'
+        conds, params = [], []
+        if task_type:
+            conds.append('task_type=?')
+            params.append(task_type)
+        if before_id:
+            conds.append('id<?')
+            params.append(before_id)
+        if conds:
+            sql += ' WHERE ' + ' AND '.join(conds)
+        sql += ' ORDER BY id DESC LIMIT ?'
+        params.append(max(1, limit))
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        out = []
+        for r in reversed(rows):
+            d = dict(r)
+            d['ok'] = bool(d['ok'])
+            d['usage'] = json.loads(d.pop('usage_json') or '{}')
+            d['request'] = json.loads(d.pop('request_json') or 'null')
+            d['response'] = json.loads(d.pop('response_json') or 'null')
+            out.append(d)
+        return out

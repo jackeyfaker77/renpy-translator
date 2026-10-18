@@ -2,9 +2,9 @@
 /** 定时任务：倒计时 / 时间点 / 时间段（循环独立设置），指定项目独立执行 */
 import { computed, h, onMounted, onUnmounted, reactive, ref } from 'vue'
 import {
-  NButton, NCheckbox, NDataTable, NDatePicker, NEmpty, NInput, NInputNumber,
-  NModal, NPopconfirm, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch,
-  NText, NTimePicker, useMessage,
+  NButton, NCheckbox, NDataTable, NDatePicker, NDivider, NEmpty, NInput,
+  NInputNumber, NModal, NPopconfirm, NRadioButton, NRadioGroup, NSelect,
+  NSpace, NSwitch, NText, NTimePicker, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { api, toastError, toastOk } from '../api/client'
@@ -91,8 +91,8 @@ const form = reactive({
   params: {} as Record<string, unknown>,
   schedule_type: 'delay' as ScheduleType,
   repeat_policy: 'once' as 'once' | 'daily',
-  delayMinutes: 60,
-  delayUnit: 60,
+  delayMinutes: 30,
+  delayUnit: 1,
   atTs: Date.now() + 3600_000,
   winStart: '01:00',
   winEnd: '05:00',
@@ -112,8 +112,8 @@ function openCreate() {
   applyKindDefaults('texts.translate-all.dialogue')
   form.schedule_type = 'delay'
   form.repeat_policy = 'once'
-  form.delayMinutes = 60
-  form.delayUnit = 60
+  form.delayMinutes = 30
+  form.delayUnit = 1
   form.atTs = Date.now() + 3600_000
   form.winStart = '01:00'
   form.winEnd = '05:00'
@@ -129,8 +129,8 @@ function openEdit(t: SchedTask) {
   form.schedule_type = t.schedule_type
   form.repeat_policy = t.repeat_policy
   if (t.schedule_type === 'delay') {
-    form.delayMinutes = Number(t.schedule.minutes || 60)
-    form.delayUnit = 60
+    form.delayMinutes = Number(t.schedule.minutes || 30)
+    form.delayUnit = 1
   } else if (t.schedule_type === 'at') {
     form.atTs = Date.parse(String(t.schedule.at))
   } else {
@@ -269,22 +269,22 @@ const columns = computed<DataTableColumns<SchedTask>>(() => [
     <n-modal v-model:show="formVisible" preset="card"
              :title="editingId ? '编辑定时任务' : '新建定时任务'"
              style="width: min(560px, 96vw)">
-      <n-space vertical>
+      <n-space vertical size="small">
+        <!-- 执行内容 -->
+        <n-divider title-placement="left" style="margin: 4px 0 2px">执行内容</n-divider>
         <n-input v-model:value="form.name" placeholder="任务名称（如：半夜批量翻译）" />
         <n-space align="center">
-          <n-text style="width: 60px; font-size: 12px">目标项目</n-text>
+          <n-text class="fld-label">目标项目</n-text>
           <n-select v-model:value="form.project" :options="projectOptions"
                     style="flex: 1" placeholder="到点后独立执行的项目" />
         </n-space>
         <n-space align="center">
-          <n-text style="width: 60px; font-size: 12px">任务类型</n-text>
+          <n-text class="fld-label">任务类型</n-text>
           <n-select :value="form.kind" :options="kindOptions" style="flex: 1"
                     @update:value="applyKindDefaults" />
         </n-space>
-
-        <!-- 类型参数（细粒度与直接执行一致） -->
         <n-space v-if="paramKind === 'scope'" align="center" wrap>
-          <n-text style="width: 60px; font-size: 12px">范围</n-text>
+          <n-text class="fld-label">范围</n-text>
           <n-select :value="String(form.params.filter_mode || 'all')" style="width: 110px"
                     :options="[
                       { label: '全部', value: 'all' },
@@ -295,10 +295,10 @@ const columns = computed<DataTableColumns<SchedTask>>(() => [
           <n-input v-model:value="(form.params.character as string)" size="small"
                    style="width: 130px" placeholder="角色变量名（可选）" />
           <n-input v-model:value="(form.params.search as string)" size="small"
-                   style="flex: 1" placeholder="搜索过滤（可选）" />
+                   style="flex: 1; min-width: 140px" placeholder="搜索过滤（可选）" />
         </n-space>
         <n-space v-else-if="paramKind === 'mode'" align="center">
-          <n-text style="width: 60px; font-size: 12px">模式</n-text>
+          <n-text class="fld-label">模式</n-text>
           <n-radio-group :value="String(form.params.mode || 'both')" size="small"
                          @update:value="(v: string) => { form.params.mode = v }">
             <n-radio-button value="both">翻译+分析</n-radio-button>
@@ -307,21 +307,22 @@ const columns = computed<DataTableColumns<SchedTask>>(() => [
           </n-radio-group>
         </n-space>
         <n-space v-else-if="paramKind === 'shell'" align="center">
-          <n-text style="width: 60px; font-size: 12px">导出</n-text>
+          <n-text class="fld-label">导出</n-text>
           <n-checkbox :checked="Boolean(form.params.shell)"
                       @update:checked="(v: boolean) => { form.params.shell = v }">
             套 macOS 应用壳（无壳项目忽略）
           </n-checkbox>
         </n-space>
         <n-space v-else-if="paramKind === 'chunk'" align="center">
-          <n-text style="width: 60px; font-size: 12px">每批</n-text>
+          <n-text class="fld-label">每批</n-text>
           <n-input-number :value="Number(form.params.chunk_size || 10)" :min="1" :max="50"
                           style="width: 90px"
                           @update:value="(v: number | null) => { form.params.chunk_size = v ?? 10 }" />
           <n-text depth="3" style="font-size: 12px">条</n-text>
         </n-space>
 
-        <!-- 调度方式 -->
+        <!-- 执行计划 -->
+        <n-divider title-placement="left" style="margin: 4px 0 2px">执行计划</n-divider>
         <n-radio-group v-model:value="form.schedule_type" size="small">
           <n-radio-button value="delay">倒计时</n-radio-button>
           <n-radio-button value="at">时间点</n-radio-button>
@@ -329,43 +330,48 @@ const columns = computed<DataTableColumns<SchedTask>>(() => [
         </n-radio-group>
 
         <n-space v-if="form.schedule_type === 'delay'" align="center">
-          <n-text style="font-size: 12px">创建后</n-text>
+          <n-text class="fld-label">触发于</n-text>
           <n-input-number v-model:value="form.delayMinutes" :min="1" style="width: 90px" />
           <n-select :value="form.delayUnit" style="width: 90px"
                     :options="[
-                      { label: '分钟后', value: 60 }, { label: '小时后', value: 3600 },
-                      { label: '天后', value: 86400 },
+                      { label: '分钟后', value: 1 }, { label: '小时后', value: 60 },
+                      { label: '天后', value: 1440 },
                     ]"
                     @update:value="(v: number) => { form.delayUnit = v }" />
-          <n-text depth="3" style="font-size: 12px">触发一次后自动停用</n-text>
+          <n-text depth="3" style="font-size: 12px">之后触发一次，自动停用</n-text>
         </n-space>
 
         <n-space v-else-if="form.schedule_type === 'at'" align="center" wrap>
-          <n-text style="font-size: 12px">触发时间</n-text>
+          <n-text class="fld-label">触发于</n-text>
           <n-date-picker v-model:value="form.atTs" type="datetime" style="width: 220px"
                          :is-date-disabled="(ts: number) => ts < Date.now() - 86400_000" />
         </n-space>
 
         <n-space v-else align="center" wrap>
-          <n-text style="font-size: 12px">每天窗口</n-text>
+          <n-text class="fld-label">每天窗口</n-text>
           <n-time-picker v-model:formatted-value="form.winStart" format="HH:mm"
                          :clearable="false" style="width: 100px" />
           <n-text depth="3">–</n-text>
           <n-time-picker v-model:formatted-value="form.winEnd" format="HH:mm"
                          :clearable="false" style="width: 100px" />
-          <n-text depth="3" style="font-size: 12px">窗口结束会取消进行中的任务</n-text>
         </n-space>
 
         <n-space align="center">
-          <n-text style="font-size: 12px">循环</n-text>
+          <n-text class="fld-label">循环</n-text>
           <n-select :value="form.schedule_type === 'delay' ? 'once' : form.repeat_policy"
                     :disabled="form.schedule_type === 'delay'" style="width: 110px"
                     :options="REPEAT_OPTIONS"
                     @update:value="(v: 'once' | 'daily') => { form.repeat_policy = v }" />
           <n-text depth="3" style="font-size: 12px">
-            {{ form.schedule_type === 'delay' ? '倒计时恒为一次' : '时间点/时间段可每天循环' }}
+            {{ form.schedule_type === 'delay' ? '倒计时恒为一次'
+               : form.schedule_type === 'window' ? '窗口结束自动取消进行中的任务'
+               : '' }}
           </n-text>
         </n-space>
+
+        <n-text depth="3" style="font-size: 12px">
+          到点为目标项目独立执行；错过时间点/窗口不补跑。
+        </n-text>
       </n-space>
       <template #footer>
         <n-space justify="end">
@@ -378,3 +384,12 @@ const columns = computed<DataTableColumns<SchedTask>>(() => [
     </n-modal>
   </div>
 </template>
+
+<style scoped>
+/* 表单左标签列：全表单统一宽度，避免行与行错位 */
+.fld-label {
+  width: 64px;
+  flex: none;
+  font-size: 12px;
+}
+</style>
