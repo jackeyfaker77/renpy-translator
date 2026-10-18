@@ -70,10 +70,8 @@ class ExportGameReq(BaseModel):
     shell: bool = True   # macOS 项目导出套 .app 壳（无壳项目忽略）
 
 
-@router.post('/game')
-async def export_game(req: ExportGameReq | None = None,
-                      state: AppState = Depends(require_project)):
-    include_shell = True if req is None else req.shell
+async def start_export_game(state, include_shell: bool = True):
+    """启动导出游戏任务（state 可为 AppState 或项目运行时；SDK 缺失抛 ApiError）"""
     # 未翻译/翻译不完全也允许导出（未译条目保持原文），由任务日志与前端提醒
     counts = {
         'dialogue': await state.db_call(state.db.get_dialogue_count),
@@ -201,3 +199,10 @@ async def export_game(req: ExportGameReq | None = None,
     job = state.jobs.create('export.game', f'导出游戏（{state.current_project}）',
                             {}, body, exclusive=True)
     return {'job_id': job.id}
+
+
+@router.post('/game')
+async def export_game(req: ExportGameReq | None = None,
+                      state: AppState = Depends(require_project)):
+    include_shell = True if req is None else req.shell
+    return await start_export_game(state, include_shell)

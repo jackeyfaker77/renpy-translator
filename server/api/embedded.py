@@ -40,9 +40,9 @@ def _row_payload(r: dict) -> dict:
     }
 
 
-@router.post('/scan')
-async def scan(state: AppState = Depends(require_project)):
-    """内嵌文本提取全管线任务：扫描→AI预筛→ask 复核(重判循环)→标记→SDK→入库"""
+async def start_embedded_scan(state):
+    """内嵌文本提取全管线任务（state 可为 AppState 或项目运行时）：
+    扫描→AI预筛→ask 复核(重判循环)→标记→SDK→入库"""
     if not state.translator:
         raise ApiError(409, 'NO_TRANSLATOR', 'AI 预筛需要翻译器，请先配置模型')
     pipe = _pipeline(state)
@@ -112,6 +112,11 @@ async def scan(state: AppState = Depends(require_project)):
     job = state.jobs.create('embedded.scan', '提取内嵌文本', {}, body,
                             exclusive=True)
     return {'job_id': job.id}
+
+
+@router.post('/scan')
+async def scan(state: AppState = Depends(require_project)):
+    return await start_embedded_scan(state)
 
 
 @router.post('/refine/{row_id}')

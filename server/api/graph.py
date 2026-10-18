@@ -58,15 +58,13 @@ class StoryBuildIn(BaseModel):
     engine_render: bool = False
 
 
-@router.post('/story/build')
-async def build_story(req: StoryBuildIn = None,
-                      state: AppState = Depends(require_project)):
+async def start_story_build(state, incremental: bool = False,
+                            engine_render: bool = False):
+    """启动剧情图构建任务（state 可为 AppState 或项目运行时）"""
     game_root = (state.project_manager.project_dir(state.current_project)
                  / 'game')
     cache_dir = _cache_dir(state)
     translator = state.translator  # 无模型时 AI 场景标题阶段自动跳过
-    incremental = bool(req and req.incremental)
-    engine_render = bool(req and req.engine_render)
 
     async def body(job):
         def _build():
@@ -87,6 +85,15 @@ async def build_story(req: StoryBuildIn = None,
         '增量更新剧情图' if incremental else '构建剧情图', {}, body,
         exclusive=True)
     return {'job_id': job.id}
+
+
+@router.post('/story/build')
+async def build_story(req: StoryBuildIn = None,
+                      state: AppState = Depends(require_project)):
+    return await start_story_build(
+        state,
+        incremental=bool(req and req.incremental),
+        engine_render=bool(req and req.engine_render))
 
 
 @router.get('/scenes')
@@ -223,13 +230,11 @@ class RelationsBuildIn(BaseModel):
     engine_render: bool = False
 
 
-@router.post('/relations/build')
-async def build_relations(req: RelationsBuildIn = None,
-                          state: AppState = Depends(require_project)):
+async def start_relations_build(state, engine_render: bool = False):
+    """启动关系图构建任务（state 可为 AppState 或项目运行时）"""
     translator = state.translator
     if translator is None:
         raise ApiError(409, 'NO_MODEL', '请先在模型配置中设置 API')
-    engine_render = bool(req and req.engine_render)
 
     async def body(job):
         def _build():
@@ -249,6 +254,13 @@ async def build_relations(req: RelationsBuildIn = None,
     job = state.jobs.create('graph.relations-build', '构建人物关系图谱', {},
                             body, exclusive=True)
     return {'job_id': job.id}
+
+
+@router.post('/relations/build')
+async def build_relations(req: RelationsBuildIn = None,
+                          state: AppState = Depends(require_project)):
+    return await start_relations_build(
+        state, engine_render=bool(req and req.engine_render))
 
 
 def _engine_avatars(state: AppState, job):

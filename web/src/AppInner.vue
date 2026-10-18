@@ -37,6 +37,7 @@ const menuOptions = computed<MenuOption[]>(() => {
         { label: '对话', key: '/dialogue' },
         { label: '术语表', key: '/glossary' },
         { label: '导出游戏', key: '/export' },
+        { label: '定时任务', key: '/schedule' },
       ]
     : [{ label: '项目库', key: '/projects' }]
   const groups: MenuOption[] = [

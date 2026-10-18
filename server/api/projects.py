@@ -451,8 +451,8 @@ async def update_review_action(name: str, row_id: int, req: ReviewActionRequest,
     return {'ok': True}
 
 
-@router.post('/{name}/export-zip')
-async def export_zip(name: str, state: AppState = Depends(get_state)):
+async def start_export_zip(state, name: str):
+    """导出项目包任务（state 可为 AppState 或项目运行时，name 为目标项目）"""
     if not state.project_manager.project_exists(name):
         raise ApiError(404, 'PROJECT_NOT_FOUND', f'项目不存在: {name}')
 
@@ -543,6 +543,11 @@ async def export_zip(name: str, state: AppState = Depends(get_state)):
     job = state.jobs.create('project.export-zip', f'导出项目包 {name}', {}, body,
                             exclusive=True)
     return {'job_id': job.id}
+
+
+@router.post('/{name}/export-zip')
+async def export_zip(name: str, state: AppState = Depends(get_state)):
+    return await start_export_zip(state, name)
 
 
 class EditRequest(BaseModel):

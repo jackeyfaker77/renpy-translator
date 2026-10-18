@@ -259,20 +259,21 @@ class TranslateAllIn(BaseModel):
     character: str = ''
 
 
-@router.post('/texts/{content_type}/translate-all')
-async def translate_all(content_type: str,
-                        req: Optional[TranslateAllIn] = None,
-                        state: AppState = Depends(require_project)):
-    _check_ct(content_type)
-    _service(state)
-    scope = req or TranslateAllIn()
+async def start_translate_all(rt, content_type: str,
+                              scope: Optional[TranslateAllIn] = None):
+    """启动「全部翻译」任务（rt 可为 AppState 或定时任务的项目运行时）。
+
+    返回 {'job_id', 'message'?}；无待译内容时 job_id=None。
+    """
+    _service(rt)
+    scope = scope or TranslateAllIn()
     if content_type == 'dialogue':
-        rows = await state.db_call(state.db.get_dialogues_filtered,
-                                   scope.filter_mode, scope.character,
-                                   scope.search)
+        rows = await rt.db_call(rt.db.get_dialogues_filtered,
+                                scope.filter_mode, scope.character,
+                                scope.search)
     else:
-        rows = await state.db_call(state.db.get_ui_texts_filtered,
-                                   scope.filter_mode, scope.search)
+        rows = await rt.db_call(rt.db.get_ui_texts_filtered,
+                                scope.filter_mode, scope.search)
     items = [r for r in rows if not (r.get('translated_text') or '').strip()]
     if not items:
         return {'job_id': None, 'message': '没有待翻译的内容'}
@@ -284,13 +285,21 @@ async def translate_all(content_type: str,
         label = f'翻译当前筛选（{len(items)} 条）'
     else:
         label = f'全部翻译（{"对话" if content_type == "dialogue" else "字符串"}，{len(items)} 条）'
-    job = state.jobs.create(
+    job = rt.jobs.create(
         f'texts.translate-all.{content_type}',
         label,
         {'content_type': content_type},
-        _make_translate_job(state, content_type, items),
+        _make_translate_job(rt, content_type, items),
         exclusive=True)
     return {'job_id': job.id}
+
+
+@router.post('/texts/{content_type}/translate-all')
+async def translate_all(content_type: str,
+                        req: Optional[TranslateAllIn] = None,
+                        state: AppState = Depends(require_project)):
+    _check_ct(content_type)
+    return await start_translate_all(state, content_type, req)
 
 
 class TranslatePageIn(BaseModel):
@@ -386,22 +395,16 @@ class RetryFailedIn(BaseModel):
     chunk_size: int = 10
 
 
-@router.post('/texts/{content_type}/failed-batches/retry')
-async def retry_failed_items(content_type: str, req: RetryFailedIn,
-                             state: AppState = Depends(require_project)):
-    """把全部暂存条目拆成小批重新翻译（任务）
-
-    成功的条目直接写库；仍失败的回写暂存，全部译出的批次记录删除。
-    """
-    _check_ct(content_type)
-    _service(state)
-    chunk_size = max(1, min(req.chunk_size, 50))
-    recs = await _prune_failed_batches(state, content_type)
+async def start_failed_retry(rt, content_type: str, chunk_size: int):
+    """启动「失败条目重试」任务（rt 可为 AppState 或项目运行时）"""
+    _service(rt)
+    chunk_size = max(1, min(chunk_size, 50))
+    recs = await _prune_failed_batches(rt, content_type)
     if not recs:
         return {'job_id': None, 'message': '没有待核验的失败条目'}
 
     async def body(job):
-        service = _service(state)
+        service = _service(rt)
         remaining_map = {rec['id']: rec['items'] for rec in recs}
         all_items = [it for rec in recs for it in rec['items']]
         chunks = [all_items[i:i + chunk_size]
@@ -423,10 +426,10 @@ async def retry_failed_items(content_type: str, req: RetryFailedIn,
         for batch_id, remaining in remaining_map.items():
             left = [it for it in remaining if it['id'] in failed_ids]
             if left:
-                await state.db_call(
-                    state.db.update_failed_batch_items, batch_id, left)
+                await rt.db_call(
+                    rt.db.update_failed_batch_items, batch_id, left)
             else:
-                await state.db_call(state.db.delete_failed_batch, batch_id)
+                await rt.db_call(rt.db.delete_failed_batch, batch_id)
         if failed_ids:
             job.emit_log(f'{len(failed_ids)} 条仍未译出，已保留在暂存中')
         else:
@@ -434,13 +437,24 @@ async def retry_failed_items(content_type: str, req: RetryFailedIn,
         return {'retried': len(all_items), 'failed': len(failed_ids)}
 
     total = sum(len(rec['items']) for rec in recs)
-    job = state.jobs.create(
+    job = rt.jobs.create(
         f'texts.failed-retry.{content_type}',
         f'失败条目重试（{"对话" if content_type == "dialogue" else "字符串"}，'
         f'{total} 条）',
         {'content_type': content_type},
         body, exclusive=True)
     return {'job_id': job.id}
+
+
+@router.post('/texts/{content_type}/failed-batches/retry')
+async def retry_failed_items(content_type: str, req: RetryFailedIn,
+                             state: AppState = Depends(require_project)):
+    """把全部暂存条目拆成小批重新翻译（任务）
+
+    成功的条目直接写库；仍失败的回写暂存，全部译出的批次记录删除。
+    """
+    _check_ct(content_type)
+    return await start_failed_retry(state, content_type, req.chunk_size)
 
 
 @router.delete('/texts/{content_type}/failed-batches')
@@ -454,23 +468,28 @@ async def clear_failed_batches(content_type: str,
 
 # ---- UI 字符串：重建出处 ----
 
-@router.post('/texts/ui/hints/rebuild')
-async def rebuild_hints(state: AppState = Depends(require_project)):
+async def start_hints_rebuild(rt):
+    """启动「重建字符串上下文」任务（rt 可为 AppState 或项目运行时）"""
     async def body(job):
         from renpy_parser import RenpyParser
-        project_dir = state.project_manager.project_dir(state.current_project)
+        project_dir = rt.project_manager.project_dir(rt.current_project)
         game_root = project_dir / 'game'
 
         job.emit_log('正在回扫源码定位字符串出处...')
-        hints = await state.run_sync(
+        hints = await rt.run_sync(
             RenpyParser().locate_ui_string_contexts, str(game_root))
-        matched = await state.db_call(state.db.update_ui_hints, hints)
-        counts = await state.db_call(state.db.get_ui_text_count)
+        matched = await rt.db_call(rt.db.update_ui_hints, hints)
+        counts = await rt.db_call(rt.db.get_ui_text_count)
         job.emit_progress(1.0, f'完成: {matched}/{counts["total"]} 条命中')
         return {'matched': matched, 'total': counts['total']}
 
-    job = state.jobs.create('ui.hints-rebuild', '重建字符串上下文', {}, body)
+    job = rt.jobs.create('ui.hints-rebuild', '重建字符串上下文', {}, body)
     return {'job_id': job.id}
+
+
+@router.post('/texts/ui/hints/rebuild')
+async def rebuild_hints(state: AppState = Depends(require_project)):
+    return await start_hints_rebuild(state)
 
 
 # ---- 风格指南 ----

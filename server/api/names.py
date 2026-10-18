@@ -90,12 +90,11 @@ class TranslateAllIn(BaseModel):
     mode: str = 'both'
 
 
-@router.post('/translate-all')
-async def translate_all(req: TranslateAllIn = TranslateAllIn(),
-                        state: AppState = Depends(require_project)):
-    if req.mode not in _MODES:
-        raise ApiError(400, 'BAD_MODE', f'未知 mode: {req.mode}')
-    service = state.get_name_service(await _max_context_k(state))
+async def start_names_all(rt, mode: str):
+    """启动人名批量任务（rt 可为 AppState 或项目运行时）"""
+    if mode not in _MODES:
+        raise ApiError(400, 'BAD_MODE', f'未知 mode: {mode}')
+    service = rt.get_name_service(await _max_context_k(rt))
 
     async def body(job):
         service.on_progress = lambda i, total, text: job.emit_progress(
@@ -103,7 +102,7 @@ async def translate_all(req: TranslateAllIn = TranslateAllIn(),
         service.on_row_busy = lambda n: job.emit_log(f'开始: {n}')
         # 取消传播：轮询 job.cancel_event → service.stop()（服务内部
         # 分批循环会检查 _cancel；批量任务体内不能随意 raise，会被吞）
-        task = asyncio.create_task(service.translate_all(mode=req.mode))
+        task = asyncio.create_task(service.translate_all(mode=mode))
         while not task.done():
             if job.cancel_event.is_set():
                 service.stop()
@@ -114,10 +113,16 @@ async def translate_all(req: TranslateAllIn = TranslateAllIn(),
         return result
 
     title = {'both': '全部翻译+分析（人名）', 'name': '全部翻译（人名）',
-             'analyze': '全部分析（角色）'}[req.mode]
-    job = state.jobs.create(f'names.translate-all.{req.mode}', title, {}, body,
-                            exclusive=True)
+             'analyze': '全部分析（角色）'}[mode]
+    job = rt.jobs.create(f'names.translate-all.{mode}', title, {}, body,
+                         exclusive=True)
     return {'job_id': job.id}
+
+
+@router.post('/translate-all')
+async def translate_all(req: TranslateAllIn = TranslateAllIn(),
+                        state: AppState = Depends(require_project)):
+    return await start_names_all(state, req.mode)
 
 
 @router.post('/keep-original-all')

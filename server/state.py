@@ -140,6 +140,7 @@ class AppState:
         self._name_service_key = None
         self.db_lock = asyncio.Lock()
         self.interrupted_count = 0    # 启动时标记的中断任务数（前端汇总提示用）
+        self._sched_task = None       # 定时任务调度循环（startup 创建）
 
         # 临时文件统一进数据根/temp（系统 TEMP 删除失败会撑爆），
         # 并通过 tempfile.tempdir 覆盖所有 stdlib 临时文件落点
@@ -172,6 +173,49 @@ class AppState:
                 self.logger.error(f'自动打开上次项目失败（已跳过）: {last} - {e}')
         # 常备 8.x + 7.x 两个 SDK：缺哪个大版本自动后台下载补齐
         await self._ensure_sdks()
+
+        # 定时任务调度循环（30s 一扫；取消即停）
+        async def _schedule_loop():
+            while True:
+                await asyncio.sleep(30)
+                try:
+                    from .scheduler import schedule_tick
+                    await schedule_tick(self)
+                except Exception as e:  # noqa: BLE001 — 单次扫描失败不退出循环
+                    self.logger.error(f'定时任务扫描失败: {e}')
+
+        self._sched_task = asyncio.get_event_loop().create_task(_schedule_loop())
+
+    def project_runtime(self, name: str):
+        """为指定项目构建独立执行上下文（定时任务用）。
+
+        打开项目库 + 按全局激活配置新建翻译器/翻译服务；返回可鸭子
+        替代 AppState 的 ProjectRuntime，用完 close() 释放资源。
+        无该项目 / 无模型配置时 translator 为 None（任务体自查报错）。
+        """
+        from .scheduler import ProjectRuntime
+        db = self.project_manager.open_project(name)
+        if db is None:
+            return None
+        translator = None
+        tsvc = None
+        cfg = self._current_model_config()
+        if cfg:
+            from translator import AITranslator, TranslationConfig
+            translator = AITranslator(TranslationConfig(
+                api_base=cfg.api_base, api_key=cfg.api_key,
+                model=cfg.model, temperature=cfg.temperature,
+                max_tokens=cfg.max_tokens, context_lines=cfg.context_lines,
+                timeout=cfg.timeout,
+                thinking=getattr(cfg, 'thinking', 'default')))
+            from translation_service import TranslationService
+            tsvc = TranslationService(
+                translator=translator, db=db, logger=self.logger,
+                max_context_k=getattr(cfg, 'max_context', 8),
+                max_tokens=getattr(cfg, 'max_tokens', None),
+                batch_lines=getattr(cfg, 'batch_lines', 100))
+            tsvc.config_provider = self._make_config_provider()
+        return ProjectRuntime(self, name, db, translator, tsvc)
 
     async def _ensure_sdks(self):
         """检测默认目录下的 SDK，缺的大版本以任务形式自动后台下载。
@@ -207,6 +251,10 @@ class AppState:
 
     async def shutdown(self):
         loop = asyncio.get_event_loop()
+        # 先停调度循环（不再触发新任务）
+        sched = getattr(self, '_sched_task', None)
+        if sched is not None:
+            sched.cancel()
         # 先取消所有未完成任务并等其退出，再关库（否则任务收尾写库撞关库）
         for rec in self.app_db.list_jobs(active_only=True):
             self.jobs.cancel(rec['id'])
