@@ -135,11 +135,14 @@ const runningSummary = computed(() => {
   return `${j.label || '任务'} ${Math.round(j.progress * 100)}%${j.stage ? ' · ' + j.stage : ''}`
 })
 
-/** 铃铛徽标：等待确认/本会话失败（红），无则不显示 */
+/** 铃铛徽标：等待确认/本会话失败（红）；否则进行中任务数（蓝）——运行中也要可见 */
 const bellBadge = computed(() => {
   if (waitingJobs.value.length) return waitingJobs.value.length
-  return failedInView.value.length
+  if (failedInView.value.length) return failedInView.value.length
+  return activeCount.value
 })
+const bellType = computed<'error' | 'info'>(() =>
+  (waitingJobs.value.length || failedInView.value.length) ? 'error' : 'info')
 
 function openJobsDrawer() {
   jobsDrawerOpen.value = true
@@ -373,7 +376,7 @@ onUnmounted(() => {
                 title="关闭当前项目" @click="closeProject">关闭</n-button>
       <span style="flex: 1" />
       <!-- 铃铛：入口常驻（才能被学会），徽标=等待确认/失败数 -->
-      <n-badge :value="bellBadge" :max="99" :show="bellBadge > 0" type="error">
+      <n-badge :value="bellBadge" :max="99" :show="bellBadge > 0" :type="bellType">
         <n-button size="tiny" quaternary @click="openJobsDrawer">任务中心</n-button>
       </n-badge>
       <!-- 帮助/关于：低频维护不再占黄金位 -->

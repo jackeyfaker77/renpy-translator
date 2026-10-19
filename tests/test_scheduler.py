@@ -130,3 +130,27 @@ def test_scheduled_task_crud(appdb):
 
     assert appdb.delete_scheduled_task(tid)
     assert appdb.get_scheduled_task(tid) is None
+
+
+# ---- 调度配置校验：过去的时间不能设置 ----
+
+def test_validate_rejects_past_at():
+    from datetime import datetime, timedelta
+    from server.api.scheduled import _validate_schedule
+    from server.errors import ApiError
+    past = (datetime.now() - timedelta(minutes=5)).isoformat()
+    with pytest.raises(ApiError):
+        _validate_schedule('at', {'at': past}, 'once')
+
+
+def test_validate_rejects_window_once_ended_today():
+    from datetime import datetime, timedelta
+    from server.api.scheduled import _validate_schedule
+    from server.errors import ApiError
+    # 结束时间设为 1 分钟前（仅一次窗口今天已结束 → 永不执行）
+    end = (datetime.now() - timedelta(minutes=1)).strftime('%H:%M')
+    start = '00:00'
+    if end == '00:01':
+        pytest.skip('恰逢边界')
+    with pytest.raises(ApiError):
+        _validate_schedule('window', {'start': start, 'end': end}, 'once')

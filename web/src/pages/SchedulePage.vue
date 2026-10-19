@@ -7,7 +7,9 @@ import {
   NSpace, NSwitch, NText, NTimePicker, useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
+import { RefreshOutline } from '@vicons/ionicons5'
 import { api, toastError, toastOk } from '../api/client'
+import { renderIcon } from '../components/icons'
 import PageHeader from '../components/PageHeader.vue'
 import { useProjectsStore } from '../stores/projects'
 import { useSessionStore } from '../stores/session'
@@ -38,22 +40,40 @@ const session = useSessionStore()
 
 const tasks = ref<SchedTask[]>([])
 const nowMs = ref(Date.now())
+const listLoading = ref(false)
 let ticker: number | undefined
+let autoTimer: number | undefined
 
-async function load() {
+async function load(silent = false) {
+  if (silent) {
+    // 静默轮询：失败不打扰（页面可见时每30s与调度器同步一次）
+    try {
+      const data = await api.get<{ tasks: SchedTask[] }>('/api/scheduled')
+      tasks.value = data.tasks
+    } catch { /* 忽略 */ }
+    return
+  }
+  listLoading.value = true
   try {
     const data = await api.get<{ tasks: SchedTask[] }>('/api/scheduled')
     tasks.value = data.tasks
   } catch (e) {
     toastError(message, e)
+  } finally {
+    listLoading.value = false
   }
 }
 
 onMounted(() => {
   void load()
   ticker = window.setInterval(() => { nowMs.value = Date.now() }, 15000)
+  // 与后端30s调度周期同步：任务触发/停用后列表状态自动可见
+  autoTimer = window.setInterval(() => { void load(true) }, 30000)
 })
-onUnmounted(() => window.clearInterval(ticker))
+onUnmounted(() => {
+  window.clearInterval(ticker)
+  window.clearInterval(autoTimer)
+})
 
 function scheduleSummary(t: SchedTask): string {
   if (t.schedule_type === 'delay') {
@@ -162,18 +182,38 @@ async function submitForm() {
     return
   }
   const { type, schedule, repeat } = buildSchedule()
+  // 已过时间禁止设置/开启
+  if (type === 'at') {
+    const at = new Date(form.atTs).getTime()
+    if (at <= Date.now() + 5000) {
+      message.warning('触发时间必须晚于当前时刻（已过的时间不能设置）')
+      return
+    }
+  }
+  if (type === 'window' && repeat === 'once') {
+    const [eh, em] = String(schedule.end).split(':').map(Number)
+    const endToday = new Date()
+    endToday.setHours(eh, em, 0, 0)
+    if (endToday.getTime() <= Date.now()) {
+      message.warning('「仅一次」的时间段限今天：结束时间需晚于当前时刻')
+      return
+    }
+  }
+  const payload: Record<string, unknown> = {
+    name: form.name.trim(), params: form.params,
+    schedule_type: type, schedule, repeat_policy: repeat,
+  }
+  // 每次改期 = 从保存时刻重新计时（delay/仅一次窗口的「今天」基准）
+  if (type === 'delay' || (type === 'window' && repeat === 'once')) {
+    payload.armed_at = new Date().toISOString()
+  }
   try {
     if (editingId.value) {
-      await api.put(`/api/scheduled/${editingId.value}`, {
-        name: form.name.trim(), params: form.params,
-        schedule_type: type, schedule, repeat_policy: repeat,
-      })
+      await api.put(`/api/scheduled/${editingId.value}`, payload)
       toastOk(message, '定时任务已更新')
     } else {
       await api.post('/api/scheduled', {
-        name: form.name.trim(), kind: form.kind, project: form.project,
-        params: form.params, schedule_type: type, schedule,
-        repeat_policy: repeat,
+        kind: form.kind, project: form.project, ...payload,
       })
       toastOk(message, '定时任务已创建')
     }
@@ -207,7 +247,13 @@ async function removeTask(t: SchedTask) {
 
 async function toggleTask(t: SchedTask, v: boolean) {
   try {
-    await api.put(`/api/scheduled/${t.id}`, { enabled: v })
+    // 重新启用 = 从现在重新计时（否则沿用旧 armed_at 会导致
+    // 下次运行时间落在过去/错过，任务看起来永远不执行）
+    const body: Record<string, unknown> = { enabled: v }
+    if (v && t.schedule_type === 'delay') {
+      body.armed_at = new Date().toISOString()
+    }
+    await api.put(`/api/scheduled/${t.id}`, body)
     await load()
   } catch (e) {
     toastError(message, e)
@@ -252,15 +298,18 @@ const columns = computed<DataTableColumns<SchedTask>>(() => [
 
 <template>
   <div>
-    <page-header title="定时任务" help-section="14" />
+    <page-header title="定时任务" help-section="14">
+      <template #actions>
+        <n-button size="small" :loading="listLoading" :render-icon="renderIcon(RefreshOutline)"
+                  @click="load()">刷新</n-button>
+        <n-button size="small" type="primary" @click="openCreate">新建定时任务</n-button>
+      </template>
+    </page-header>
 
-    <n-space align="center" style="margin-bottom: 10px">
-      <n-button size="small" type="primary" @click="openCreate">新建定时任务</n-button>
-      <n-text depth="3" style="font-size: 12px">
-        到点为目标项目独立执行（不依赖当前打开的页面）；错过时间点/窗口不补跑，
-        时间段结束会取消进行中的任务（当前批次收尾）。
-      </n-text>
-    </n-space>
+    <n-text depth="3" style="display: block; margin-bottom: 12px; font-size: 12px">
+      到点为目标项目独立执行（不依赖当前打开的页面）；错过时间点/窗口不补跑，
+      时间段结束会取消进行中的任务（当前批次收尾）。
+    </n-text>
 
     <n-data-table :columns="columns" :data="tasks" size="small"
                   :row-key="(r: SchedTask) => r.id"
@@ -344,7 +393,7 @@ const columns = computed<DataTableColumns<SchedTask>>(() => [
         <n-space v-else-if="form.schedule_type === 'at'" align="center" wrap>
           <n-text class="fld-label">触发于</n-text>
           <n-date-picker v-model:value="form.atTs" type="datetime" style="width: 220px"
-                         :is-date-disabled="(ts: number) => ts < Date.now() - 86400_000" />
+                         :is-date-disabled="(ts: number) => ts < Date.now()" />
         </n-space>
 
         <n-space v-else align="center" wrap>

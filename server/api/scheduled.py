@@ -43,11 +43,23 @@ def _validate_schedule(schedule_type: str, schedule: dict, repeat: str) -> None:
             if float(schedule.get('minutes', 0)) <= 0:
                 raise ValueError('minutes 必须为正数')
         elif schedule_type == 'at':
-            datetime.fromisoformat(schedule['at'])
+            at = datetime.fromisoformat(schedule['at'])
+            # 已过的时间不能设置（防呆：错过不补跑，过去时点永不执行）
+            # 前端 ISO 带时区，与同 tz 的 now 比较（避免 aware/naive 混比）
+            now = datetime.now(at.tzinfo) if at.tzinfo else datetime.now()
+            if at <= now:
+                raise ValueError('触发时间必须晚于当前时刻')
         elif schedule_type == 'window':
             if not (_HHMM.match(schedule.get('start', ''))
                     and _HHMM.match(schedule.get('end', ''))):
                 raise ValueError('start/end 需为 HH:MM')
+            if repeat == 'once':
+                # 「仅一次」的窗口限今天：结束时间必须还没过
+                h, m = (int(x) for x in schedule['end'].split(':')[:2])
+                now = datetime.now()
+                end_today = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                if end_today <= now:
+                    raise ValueError('仅一次的时间段限今天：结束时间需晚于当前时刻')
     except (KeyError, TypeError, ValueError) as e:
         raise ApiError(400, 'BAD_SCHEDULE', f'调度配置无效: {e}') from e
 
@@ -69,6 +81,7 @@ class UpdateIn(BaseModel):
     schedule: Optional[dict] = None
     repeat_policy: Optional[str] = None
     enabled: Optional[bool] = None
+    armed_at: Optional[str] = None   # 重新启用/改期时由前端传 now，重新计时
 
 
 @router.get('')
@@ -123,6 +136,8 @@ async def update_task(task_id: str, req: UpdateIn,
         fields.update(schedule_type=st, schedule=sch, repeat_policy=repeat)
     if req.enabled is not None:
         fields['enabled'] = req.enabled
+    if req.armed_at is not None:
+        fields['armed_at'] = req.armed_at
     await state.run_sync(state.app_db.update_scheduled_task, task_id, **fields)
     return {'ok': True}
 

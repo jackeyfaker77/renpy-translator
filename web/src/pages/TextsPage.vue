@@ -9,7 +9,7 @@ import {
 } from 'naive-ui'
 import type { DataTableColumns, DataTableSortState } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
-import { DownloadOutline, LanguageOutline, ShareOutline, SparklesOutline, WarningOutline } from '@vicons/ionicons5'
+import { DownloadOutline, LanguageOutline, RefreshOutline, ShareOutline, SparklesOutline, WarningOutline } from '@vicons/ionicons5'
 import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
@@ -471,7 +471,6 @@ function onImportMenu(key: string) {
 const moreMenuOptions = computed<DropdownOption[]>(() => [
   ...(isDialogue.value ? [{ key: 'style', label: '风格指南' }] : []),
   { key: 'replace', label: '查找并替换译文' },
-  { key: 'refresh', label: '刷新' },
   ...(isDialogue.value ? [] : [
     { type: 'divider', key: 'd-more' },
     { key: 'hints', label: '高级：重建上下文' },
@@ -482,7 +481,6 @@ const moreMenuOptions = computed<DropdownOption[]>(() => [
 function onMoreMenu(key: string) {
   if (key === 'style') openStyleGuide()
   else if (key === 'replace') { replacePreview.value = null; replaceVisible.value = true }
-  else if (key === 'refresh') void load()
   else if (key === 'hints') void rebuildHints()
   else if (key === 'embedded') void extractEmbedded()
 }
@@ -782,6 +780,10 @@ watch(() => [query.filter_mode, query.character], () => {
           v-if="failedBatchCount > 0" size="small" type="warning"
           :render-icon="renderIcon(WarningOutline)" @click="failedDialogVisible = true"
         >失败条目 ({{ failedBatchCount }})</n-button>
+
+        <!-- 手动刷新（每页常驻可见） -->
+        <n-button size="small" quaternary :loading="loading"
+                  :render-icon="renderIcon(RefreshOutline)" @click="load">刷新</n-button>
 
         <!-- L3 更多：低频/高级 -->
         <n-dropdown :options="moreMenuOptions" @select="onMoreMenu">

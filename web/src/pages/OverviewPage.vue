@@ -8,6 +8,8 @@ import {
 import PageHeader from '../components/PageHeader.vue'
 import SetupChecklist from '../components/SetupChecklist.vue'
 import UpdateReportDialog from '../components/UpdateReportDialog.vue'
+import { RefreshOutline } from '@vicons/ionicons5'
+import { renderIcon } from '../components/icons'
 import { api, toastError, toastOk } from '../api/client'
 import {
   NEXT_STEP_META, isChecklistDismissed, nextStep, projectChecklist,
@@ -38,6 +40,8 @@ interface JobRow {
 }
 const recentJobs = ref<JobRow[]>([])
 
+const sideLoading = ref(false)
+
 async function loadSideData() {
   if (!session.currentProject) return
   try {
@@ -58,6 +62,17 @@ async function loadSideData() {
 onMounted(loadSideData)
 // 切换项目后重载侧数据
 watch(() => session.currentProject, loadSideData)
+
+/** 手动刷新：会话统计 + 概览侧数据 */
+async function reload() {
+  sideLoading.value = true
+  try {
+    await session.refresh()
+    await loadSideData()
+  } finally {
+    sideLoading.value = false
+  }
+}
 
 // ---- 下一步与检查单 ----
 const step = computed(() => nextStep(session, markupCount.value))
@@ -138,7 +153,12 @@ const progressRows = computed(() => {
 
 <template>
   <div>
-    <page-header :title="session.currentProject || '项目概览'" />
+    <page-header :title="session.currentProject || '项目概览'">
+      <template #actions>
+        <n-button size="small" :loading="sideLoading" :render-icon="renderIcon(RefreshOutline)"
+                  @click="reload">刷新</n-button>
+      </template>
+    </page-header>
 
     <n-empty v-if="!session.currentProject" description="未打开项目">
       <template #extra>

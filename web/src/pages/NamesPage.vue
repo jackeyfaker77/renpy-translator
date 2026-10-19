@@ -8,7 +8,7 @@ import {
 } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
-import { DownloadOutline, LanguageOutline, ShareOutline } from '@vicons/ionicons5'
+import { DownloadOutline, LanguageOutline, RefreshOutline, ShareOutline } from '@vicons/ionicons5'
 import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import ExportTextsDialog from '../components/ExportTextsDialog.vue'
@@ -204,7 +204,6 @@ const moreMenuOptions: DropdownOption[] = [
   { type: 'divider', key: 'd' },
   { key: 'rebuild', label: '重新提取角色' },
   { key: 'importFrom', label: '从其他项目导入…' },
-  { key: 'refresh', label: '刷新' },
 ]
 
 function onMoreMenu(key: string) {
@@ -218,7 +217,6 @@ function onMoreMenu(key: string) {
     })
   } else if (key === 'rebuild') void refreshCharacters()
   else if (key === 'importFrom') crossImportVisible.value = true
-  else if (key === 'refresh') void load()
 }
 
 function rowMenu(r: NameRow): DropdownOption[] {
@@ -355,6 +353,8 @@ onMounted(load)
       <!-- L2 次操作 -->
       <n-button size="small" :render-icon="renderIcon(ShareOutline)" @click="exportVisible = true">导出</n-button>
       <n-button size="small" :render-icon="renderIcon(DownloadOutline)" @click="importVisible = true">导入</n-button>
+      <!-- 手动刷新（每页常驻可见） -->
+      <n-button size="small" quaternary :render-icon="renderIcon(RefreshOutline)" @click="load">刷新</n-button>
       <!-- L3 更多 -->
       <n-dropdown :options="moreMenuOptions" @select="onMoreMenu">
         <n-button size="small" quaternary>⋯</n-button>
