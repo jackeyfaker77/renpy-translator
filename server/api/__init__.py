@@ -1,7 +1,7 @@
 """API 路由聚合"""
 from fastapi import APIRouter
 
-from . import api_logs, configs, embedded, export, export_texts, glossary, graph, import_texts, jobs, logs, names, projects, prompts, scheduled, session, system, texts, translate_options, updates
+from . import api_logs, configs, embedded, export, export_texts, glossary, graph, import_texts, jobs, logs, mcp_admin, names, projects, prompts, scheduled, session, system, texts, translate_options, updates
 from ..version import app_version as _app_version
 
 router = APIRouter()
@@ -53,3 +53,4 @@ router.include_router(import_texts.router)
 router.include_router(graph.router)
 router.include_router(system.router)
 router.include_router(updates.router)
+router.include_router(mcp_admin.router)

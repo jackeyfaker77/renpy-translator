@@ -1,13 +1,14 @@
-"""FastAPI 应用工厂：CORS、API 路由、SPA 静态挂载（fallback 到 index.html）"""
+"""FastAPI 应用工厂：CORS、API 路由、MCP 挂载、SPA 静态挂载（fallback 到 index.html）"""
 import asyncio
 import logging
+import secrets
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .errors import register_error_handlers
@@ -50,7 +51,13 @@ async def lifespan(app: FastAPI):
     asyncio.get_running_loop().set_exception_handler(_quiet_disconnect_errors)
     app.state.app_state = AppState(app.state.root)
     await app.state.app_state.startup()
-    yield
+    # mount 会禁用 MCP 子应用内置 lifespan：宿主必须自己跑 session_manager
+    mcp = getattr(app.state, 'mcp', None)
+    if mcp is not None:
+        async with mcp.session_manager.run():
+            yield
+    else:
+        yield
     # 关停广播在 /api/shutdown 端点里做（lifespan 退出时连接已被 uvicorn 断开）
     await app.state.app_state.shutdown()
 
@@ -88,6 +95,35 @@ def create_app(root: Path = None) -> FastAPI:
 
     from .api import router as api_router
     app.include_router(api_router, prefix='/api')
+
+    # MCP：可选 token 只拦 /mcp（WebUI /api 保持既有信任级）
+    @app.middleware('http')
+    async def mcp_auth(request: Request, call_next):
+        path = request.url.path
+        if path != '/mcp' and not path.startswith('/mcp/'):
+            return await call_next(request)
+        state = getattr(request.app.state, 'app_state', None)
+        if state is None:
+            return JSONResponse(status_code=404, content={
+                'error': {'code': 'MCP_UNAVAILABLE', 'message': '服务启动中'}})
+        db = state.app_db
+        if db.get_setting('mcp_enabled', '0') != '1':
+            return JSONResponse(status_code=404, content={
+                'error': {'code': 'MCP_DISABLED',
+                          'message': 'MCP 未启用（设置页可开启）'}})
+        token = db.get_setting('mcp_token', '')
+        if token:
+            auth = request.headers.get('authorization', '')
+            got = auth[7:] if auth.startswith('Bearer ') else ''
+            if not secrets.compare_digest(got, token):
+                return JSONResponse(status_code=401, content={
+                    'error': {'code': 'MCP_UNAUTHORIZED',
+                              'message': '缺少或错误的 Authorization: Bearer <token>'}})
+        return await call_next(request)
+
+    # MCP 必须在 SPA catch-all 之前挂载（GET catch-all 会吞 MCP 的 GET/SSE）
+    from .mcp_service import install_mcp
+    install_mcp(app)
 
     if _WEB_DIST.is_dir():
         app.mount('/assets', StaticFiles(directory=_WEB_DIST / 'assets'),

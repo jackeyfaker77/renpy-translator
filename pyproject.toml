@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.137.1",
+    "mcp>=2.3,<3",
     "openai>=2.41.1",
     "openpyxl>=3.1.5",
     "pillow>=12.3.0",
