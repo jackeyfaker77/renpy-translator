@@ -215,7 +215,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div style="max-width: 1200px">
+  <div class="diag-page" style="max-width: 1200px">
     <n-space align="center" style="margin-bottom: 8px" wrap>
       <h2 style="margin: 0">诊断</h2>
       <n-space align="center" style="gap: 6px">
@@ -360,17 +360,26 @@ onUnmounted(() => {
   opacity: 1;
   outline: 2px solid var(--rt-text1);
 }
+/* 整页固定视口高度：列表与详情两栏各自独立滚动（不再整页滚动） */
+.diag-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 84px);   /* 减顶栏52 + 内容区上下内边距32 */
+}
 .main {
   display: flex;
   gap: 12px;
-  align-items: flex-start;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 .ledger {
   flex: 1.2;
   min-width: 0;
+  height: 100%;
   border: 1px solid var(--n-border-color, var(--rt-border));
   border-radius: 6px;
-  overflow: hidden;
+  overflow-y: auto;
 }
 .row {
   display: flex;
@@ -382,9 +391,12 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--rt-border);
 }
 .row.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   cursor: default;
   font-weight: 600;
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--rt-surface1);
 }
 .row.active {
   background: rgba(99, 226, 183, 0.14);
@@ -407,9 +419,11 @@ onUnmounted(() => {
 .inspector {
   flex: 1;
   min-width: 0;
+  height: 100%;
   border: 1px solid var(--n-border-color, var(--rt-border));
   border-radius: 6px;
   padding: 10px;
+  overflow-y: auto;
 }
 .section {
   margin-bottom: 12px;
