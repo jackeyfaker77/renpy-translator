@@ -1026,7 +1026,7 @@ async function saveAdd() {
             </template>
             AI 重算会替换自动生成的关系（人工添加的保留），继续？
           </n-popconfirm>
-          <page-help :section="'9'" />
+          <page-help :section="'10'" />
         </n-space>
       </n-space>
       <n-space v-if="factions.length" :size="6" style="margin-top: 8px">

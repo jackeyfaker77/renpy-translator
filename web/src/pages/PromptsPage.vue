@@ -178,7 +178,7 @@ onMounted(load)
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px">
       <h2 style="margin: 0">提示词设置</h2>
-      <page-help style="margin-left: auto" :section="'12'" />
+      <page-help style="margin-left: auto" :section="'13'" />
       <n-popconfirm @positive-click="resetAll">
         <template #trigger>
           <n-button size="small" type="error" quaternary

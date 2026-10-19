@@ -1,23 +1,19 @@
 <script setup lang="ts">
+/** 模型配置页：仅 AI 模型（SDK/数据目录在路径配置，MCP 在 MCP 接入） */
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NButton, NCard, NEmpty, NForm, NFormItem, NInput, NInputGroup, NInputNumber,
-  NModal, NPopconfirm, NSelect, NSpace, NSpin, NSwitch, NTag, NText, useMessage,
+  NButton, NCard, NEmpty, NForm, NFormItem, NInput, NInputNumber,
+  NModal, NPopconfirm, NSelect, NSpace, NTag, NText, useMessage,
 } from 'naive-ui'
-import { AddOutline, CloudDownloadOutline, CopyOutline, FolderOpenOutline, RefreshOutline } from '@vicons/ionicons5'
+import { AddOutline, RefreshOutline } from '@vicons/ionicons5'
 import { api, toastError, toastOk } from '../api/client'
 import { renderIcon } from '../components/icons'
 import PageHeader from '../components/PageHeader.vue'
-import { nativeReady, pickDirectory } from '../api/native'
-import { useJobTask } from '../composables/useJobTask'
-import { useSessionStore } from '../stores/session'
 
 const message = useMessage()
 const route = useRoute()
 const router = useRouter()
-const session = useSessionStore()
-const { runJob } = useJobTask()
 
 interface ModelConfig {
   name: string
@@ -35,124 +31,6 @@ interface ModelConfig {
 }
 
 const configs = ref<ModelConfig[]>([])
-interface SdkInfo {
-  version: string
-  version_tuple: number[]
-  path: string
-  major: number
-  is_default: boolean
-}
-const sdkList = ref<SdkInfo[]>([])
-const sdkVersion = ref('')
-const guiMode = ref(false)
-
-// ---- 数据目录 ----
-const dataDir = ref('')
-const newDataDir = ref('')
-const migrating = ref(false)
-
-// ---- MCP 接入 ----
-interface McpSettings {
-  enabled: boolean; tool_mode: string; has_token: boolean; endpoint: string
-}
-const mcp = ref<McpSettings>({
-  enabled: false, tool_mode: 'curated', has_token: false, endpoint: '',
-})
-const mcpTokenPlain = ref('')   // 仅生成后展示一次
-const mcpBusy = ref(false)
-
-async function loadMcp() {
-  mcp.value = await api.get<McpSettings>('/api/settings/mcp')
-}
-
-async function setMcpEnabled(v: boolean) {
-  try {
-    mcp.value = await api.put<McpSettings>('/api/settings/mcp', { enabled: v })
-    toastOk(message, v ? 'MCP 已启用' : 'MCP 已关闭')
-  } catch (e) {
-    toastError(message, e)
-    await loadMcp()
-  }
-}
-
-async function setMcpMode(v: string) {
-  try {
-    mcp.value = await api.put<McpSettings>('/api/settings/mcp', { tool_mode: v })
-    toastOk(message, v === 'full'
-      ? '已切到全量工具：客户端需重新连接才能看到新列表'
-      : '已切回精选工具：客户端需重新连接才能看到新列表')
-  } catch (e) {
-    toastError(message, e)
-    await loadMcp()
-  }
-}
-
-async function genMcpToken() {
-  mcpBusy.value = true
-  try {
-    const data = await api.post<McpSettings & { token: string }>(
-      '/api/settings/mcp/token')
-    mcpTokenPlain.value = data.token
-    mcp.value = { ...mcp.value, has_token: true }
-    toastOk(message, 'Token 已生成（仅显示这一次，请立即复制保存）')
-  } catch (e) {
-    toastError(message, e)
-  } finally {
-    mcpBusy.value = false
-  }
-}
-
-async function clearMcpToken() {
-  try {
-    mcp.value = await api.del<McpSettings>('/api/settings/mcp/token')
-    mcpTokenPlain.value = ''
-    toastOk(message, 'Token 已清除（当前无 token，仅本机可直连）')
-  } catch (e) {
-    toastError(message, e)
-  }
-}
-
-async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    toastOk(message, '已复制')
-  } catch {
-    message.warning('剪贴板不可用，请手动复制')
-  }
-}
-
-async function browseDataDir() {
-  const dir = await pickDirectory()
-  if (dir) newDataDir.value = dir
-}
-
-async function migrateDataDir() {
-  if (!newDataDir.value.trim() || newDataDir.value.trim() === dataDir.value) {
-    message.warning('请输入与当前不同的新目录')
-    return
-  }
-  migrating.value = true
-  try {
-    const result = await api.put<{
-      home: string; moved: string[]
-      leftover?: string[]; leftover_dir?: string; restarting?: boolean
-    }>('/api/settings/data-dir', { path: newDataDir.value.trim() })
-    dataDir.value = result.home
-    newDataDir.value = result.home
-    await session.refresh()
-    toastOk(message, `数据目录已迁移（${result.moved.length} 项）`)
-    if (result.leftover?.length) {
-      message.info(
-        `${result.leftover.length} 个被占用的日志文件已复制到新目录，`
-        + '服务将自动重启完成清理，恢复后页面会自动刷新',
-        { duration: 12000, closable: true })
-    }
-  } catch (e) {
-    toastError(message, e)
-  } finally {
-    migrating.value = false
-  }
-}
 
 const emptyForm = (): ModelConfig => ({
   name: '', api_base: 'https://api.openai.com/v1', api_key: '',
@@ -167,12 +45,6 @@ const testing = ref(false)
 
 async function refresh() {
   configs.value = await api.get<ModelConfig[]>('/api/configs')
-  const settings = await api.get<{
-    sdks: SdkInfo[]; data_dir: string
-  }>('/api/settings')
-  sdkList.value = settings.sdks || []
-  dataDir.value = settings.data_dir
-  if (!newDataDir.value) newDataDir.value = settings.data_dir
 }
 
 function openCreate() {
@@ -250,27 +122,12 @@ async function testConnection() {
   }
 }
 
-// ---- SDK 下载（任务） ----
-async function downloadSdk(version: string) {
-  await runJob(
-    () => api.post('/api/settings/sdk/download', { version }),
-    async (status) => {
-      if (status === 'succeeded') {
-        await refresh()
-        toastOk(message, 'SDK 下载完成')
-      }
-    })
-}
-
-onMounted(async () => {
-  guiMode.value = await nativeReady()
-  await Promise.all([refresh(), loadMcp()])
-})
+onMounted(refresh)
 </script>
 
 <template>
   <div style="max-width: 860px">
-    <page-header title="模型配置" help-section="1,15">
+    <page-header title="模型配置" help-section="1">
       <template #actions>
         <n-button size="small" :render-icon="renderIcon(RefreshOutline)" @click="refresh">
           刷新
@@ -278,114 +135,13 @@ onMounted(async () => {
       </template>
     </page-header>
 
-    <n-card size="small" title="Ren'Py SDK" style="margin-bottom: 16px">
-      <n-space vertical>
-        <n-text depth="3" style="font-size: 12px">
-          导出按游戏引擎版本精确匹配 SDK（如游戏 8.3.2 优先用 8.3.2），无精确匹配时退回同大版本最新；
-          缺失的 7.x/8.x 大版本会在启动时自动下载补齐。SDK 固定安装在数据目录的 tools/ 下。
-        </n-text>
-        <template v-if="sdkList.length">
-          <n-space v-for="s in sdkList" :key="s.path" align="center">
-            <n-tag size="small" type="success"
-                   style="width: 66px; justify-content: center">{{ s.version }}</n-tag>
-            <n-tag v-if="s.is_default" size="small" type="warning"
-                   style="width: 48px; justify-content: center">默认</n-tag>
-            <n-text style="font-size: 13px">{{ s.path }}</n-text>
-          </n-space>
-        </template>
-        <n-text v-else depth="3" style="font-size: 13px">未安装任何 SDK</n-text>
-        <n-space align="center">
-          <n-button size="small" :render-icon="renderIcon(CloudDownloadOutline)" @click="downloadSdk('8.5.3')">
-            下载 8.5.3
-          </n-button>
-          <n-button size="small" :render-icon="renderIcon(CloudDownloadOutline)" @click="downloadSdk('7.4.11')">
-            下载 7.4.11
-          </n-button>
-          <n-text depth="3" style="font-size: 12px">其他版本：</n-text>
-          <n-input v-model:value="sdkVersion" size="small" style="width: 90px" placeholder="如 8.4.1" />
-          <n-button size="small" :disabled="!sdkVersion.trim()" @click="downloadSdk(sdkVersion.trim())">
-            下载
-          </n-button>
-        </n-space>
-      </n-space>
-    </n-card>
-
-    <n-card size="small" title="数据目录" style="margin-bottom: 16px">
-      <n-space vertical>
-        <n-text depth="3" style="font-size: 12px">
-          项目、配置、日志、导出等全部数据的位置。修改后会把现有数据迁移过去（迁移期间请勿操作）。
-        </n-text>
-        <n-text style="font-size: 13px">当前：{{ dataDir }}</n-text>
-        <n-input-group style="width: 560px">
-          <n-input v-model:value="newDataDir" placeholder="新数据目录" />
-          <n-button v-if="guiMode" size="small" :render-icon="renderIcon(FolderOpenOutline)" @click="browseDataDir">
-            浏览
-          </n-button>
-          <n-popconfirm @positive-click="migrateDataDir">
-            <template #trigger>
-              <n-button size="small" type="warning" :disabled="migrating">迁移并切换</n-button>
-            </template>
-            将把 {{ dataDir }} 的全部数据迁移到 {{ newDataDir }}，确定？
-          </n-popconfirm>
-        </n-input-group>
-      </n-space>
-    </n-card>
-
-    <n-card size="small" title="MCP 接入（AI 客户端）" style="margin-bottom: 16px">
-      <n-space vertical>
-        <n-text depth="3" style="font-size: 12px">
-          让 Claude Code、Cursor 等 MCP 客户端直接操作本工具：翻译、导出、定时任务等全部功能。
-          仅监听本机；可选 token 只保护 /mcp 端点（不影响 WebUI 的 /api）。
-        </n-text>
-        <n-space align="center">
-          <n-text style="font-size: 13px">启用</n-text>
-          <n-switch :value="mcp.enabled" @update:value="setMcpEnabled" />
-          <n-text v-if="mcp.endpoint" depth="3" style="font-size: 12px">
-            端点：{{ mcp.endpoint }}
-          </n-text>
-          <n-button v-if="mcp.endpoint" size="tiny" quaternary
-                    :render-icon="renderIcon(CopyOutline)"
-                    @click="copyText(mcp.endpoint)">复制</n-button>
-        </n-space>
-        <n-space align="center">
-          <n-text style="font-size: 13px">工具范围</n-text>
-          <n-select :value="mcp.tool_mode" size="small" style="width: 220px"
-                    :options="[
-                      { label: '精选（30 个高层工具，推荐）', value: 'curated' },
-                      { label: '全量（REST 全镜像，上百个）', value: 'full' },
-                    ]" @update:value="setMcpMode" />
-          <n-text depth="3" style="font-size: 12px">切换后客户端需重新连接刷新工具列表</n-text>
-        </n-space>
-        <n-space align="center">
-          <n-text style="font-size: 13px">Token</n-text>
-          <n-tag size="small" :type="mcp.has_token ? 'success' : 'default'">
-            {{ mcp.has_token ? '已设置' : '未设置' }}
-          </n-tag>
-          <n-button size="small" :loading="mcpBusy" @click="genMcpToken">
-            {{ mcp.has_token ? '重新生成' : '生成' }}
-          </n-button>
-          <n-button v-if="mcp.has_token" size="small" quaternary
-                    @click="clearMcpToken">清除</n-button>
-          <n-input v-if="mcpTokenPlain" :value="mcpTokenPlain" readonly
-                   size="small" style="width: 320px"
-                   @focus="($event.target as HTMLInputElement).select()" />
-          <n-button v-if="mcpTokenPlain" size="tiny" quaternary
-                    :render-icon="renderIcon(CopyOutline)"
-                    @click="copyText(mcpTokenPlain)">复制</n-button>
-        </n-space>
-        <n-text depth="3" style="font-size: 12px">
-          客户端配置示例（Claude Code）：claude mcp add --transport http renpy
-          {{ mcp.endpoint || 'http://127.0.0.1:7861/mcp/' }}
-          <template v-if="mcp.has_token"> --header "Authorization: Bearer &lt;token&gt;"</template>
-          ，详见说明书第 15 章。
-        </n-text>
-      </n-space>
-    </n-card>
-
     <n-space align="center" style="margin-bottom: 10px">
-      <h3 style="margin: 0">AI 模型</h3>
-      <n-button size="small" type="primary" :render-icon="renderIcon(AddOutline)" @click="openCreate">新建配置</n-button>
-      <n-text depth="3" style="font-size: 12px">已激活的配置对所有项目全局生效，保存后立即应用</n-text>
+      <n-button size="small" type="primary" :render-icon="renderIcon(AddOutline)"
+                @click="openCreate">新建配置</n-button>
+      <n-text depth="3" style="font-size: 12px">
+        已激活的配置对所有项目全局生效，保存后立即应用。
+        Ren'Py SDK 与数据目录见「路径配置」；AI 编程助手接入见「MCP 接入」。
+      </n-text>
     </n-space>
 
     <n-empty v-if="!configs.length" description="暂无模型配置" style="margin: 40px 0" />
@@ -482,15 +238,6 @@ onMounted(async () => {
           <n-button type="primary" @click="saveForm">保存</n-button>
         </n-space>
       </template>
-    </n-modal>
-
-    <!-- 迁移中阻塞模态 -->
-    <n-modal :show="migrating" preset="card" title="正在迁移数据目录" style="width: min(380px, 96vw)"
-             :mask-closable="false" :closable="false">
-      <n-space align="center">
-        <n-spin size="small" />
-        <n-text>正在迁移全部数据，请勿关闭应用...</n-text>
-      </n-space>
     </n-modal>
   </div>
 </template>

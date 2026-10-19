@@ -298,7 +298,7 @@ const columns = computed<DataTableColumns<SchedTask>>(() => [
 
 <template>
   <div>
-    <page-header title="定时任务" help-section="14">
+    <page-header title="定时任务" help-section="15">
       <template #actions>
         <n-button size="small" :loading="listLoading" :render-icon="renderIcon(RefreshOutline)"
                   @click="load()">刷新</n-button>

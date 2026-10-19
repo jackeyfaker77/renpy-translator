@@ -231,7 +231,7 @@ onUnmounted(() => {
         <n-text depth="3" style="font-size: 12px">跟随最新</n-text>
       </n-space>
       <n-button size="small" :loading="loading" @click="refresh(false)">刷新</n-button>
-      <page-help style="margin-left: auto" section="13" />
+      <page-help style="margin-left: auto" section="14" />
     </n-space>
 
     <n-text v-if="!apiLogOn && !envForced" depth="3"

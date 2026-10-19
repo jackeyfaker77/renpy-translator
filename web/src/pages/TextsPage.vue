@@ -730,7 +730,7 @@ watch(() => [query.filter_mode, query.character], () => {
 <template>
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px" wrap>
-      <page-header :title="title" :help-section="isDialogue ? '5,7' : '4,7'" />
+      <page-header :title="title" :help-section="isDialogue ? '6,8' : '5,8'" />
 
       <!-- L4 选区态：整组动作替换为上下文条（Esc 可清除） -->
       <template v-if="selectedIds.length">

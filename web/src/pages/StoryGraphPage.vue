@@ -1158,7 +1158,7 @@ function speakersOfFull(s: ApiScene) {
             <n-switch v-model:value="engineRender" size="small" />
             <n-text depth="3" style="font-size: 12px">引擎渲染（实验）</n-text>
           </n-space>
-          <page-help :section="'8'" />
+          <page-help :section="'9'" />
         </n-space>
       </n-space>
     </n-card>

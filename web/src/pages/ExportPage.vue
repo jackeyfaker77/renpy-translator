@@ -77,7 +77,7 @@ onMounted(load)
 <template>
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px">
-      <page-header title="导出游戏" help-section="10" />
+      <page-header title="导出游戏" help-section="11" />
       <n-popconfirm v-if="untranslated > 0" @positive-click="startExport">
         <template #trigger>
           <n-button size="small" type="primary" :render-icon="renderIcon(PlayOutline)">开始导出</n-button>

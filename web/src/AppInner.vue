@@ -59,6 +59,8 @@ const menuOptions = computed<MenuOption[]>(() => {
         extra: session.hasTranslator ? undefined
           : () => h(NTag, { size: 'tiny', type: 'warning' }, () => '未配置'),
       },
+      { label: '路径配置', key: '/paths' },
+      { label: 'MCP 接入', key: '/mcp-access' },
       { label: '提示词设置', key: '/prompts' },
       { label: '诊断', key: '/diagnostics' },
     ],

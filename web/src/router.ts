@@ -39,6 +39,9 @@ const router = createRouter({
       meta: { needsProject: true },
     },
     { path: '/settings', component: () => import('./pages/SettingsPage.vue') },
+    { path: '/paths', component: () => import('./pages/PathsPage.vue') },
+    // 注意：不能用 /mcp——与后端 MCP 端点冲突（会 307 到 /mcp/ 协议端点）
+    { path: '/mcp-access', component: () => import('./pages/McpPage.vue') },
     { path: '/prompts', component: () => import('./pages/PromptsPage.vue') },
     { path: '/diagnostics', component: () => import('./pages/DiagnosticsPage.vue') },
     { path: '/api-logs', redirect: '/diagnostics' },

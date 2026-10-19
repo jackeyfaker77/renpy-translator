@@ -345,7 +345,7 @@ onMounted(load)
 <template>
   <div>
     <n-space align="center" style="width: 100%; margin-bottom: 12px" wrap>
-      <page-header title="人名与角色" help-section="3,7" />
+      <page-header title="人名与角色" help-section="4,8" />
       <!-- L1 主操作 -->
       <n-dropdown :options="batchMenuOptions" @select="onBatchMenu">
         <n-button size="small" type="primary" :render-icon="renderIcon(LanguageOutline)">全部翻译+分析 ▾</n-button>
