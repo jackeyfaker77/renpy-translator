@@ -166,6 +166,8 @@ async def dispatch_full(app: FastAPI, name: str, arguments: dict,
         return CallToolResult(content=[TextContent(
             type='text', text=f'[{e.code}] {e.message}')], is_error=True)
     import json as _json
+    if isinstance(data, list):
+        data = {'items': data}
     try:
         text = _json.dumps(data, ensure_ascii=False, default=str)
     except (TypeError, ValueError):

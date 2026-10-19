@@ -29,12 +29,17 @@ def _require_confirm(confirm: bool, action_desc: str) -> None:
 async def _call(app: FastAPI, method: str, path: str, *,
                 params: dict | None = None, body: Any = None) -> Any:
     try:
-        return await api_call(app, method, path, params=params, json_body=body)
+        data = await api_call(app, method, path, params=params, json_body=body)
     except ApiBridgeError as e:
         msg = f'[{e.code}] {e.message}'
         if e.detail:
             msg += f'（{e.detail[:300]}）'
         raise ToolError(msg) from e
+    # list 会被 SDK 拆成多条 TextContent（客户端只读 content[0] 会丢数据）
+    # 统一包一层，保证 Agent 一次拿到完整 JSON
+    if isinstance(data, list):
+        return {'items': data}
+    return data
 
 
 def _pkg_abs(state: Any, file_name: str) -> str:
@@ -79,8 +84,9 @@ def register_curated(mcp: MCPServer, app: FastAPI) -> None:
     # ---- 文本 ----
 
     @mcp.tool(description='分页浏览对话/UI 文本条目。content_type=dialogue|ui；'
-                          'filter_mode: all/untranslated/translated/failed 等。')
-    async def list_texts(content_type: ContentTypes, page: int = 1, size: int = 50,
+                          'filter_mode: all/untranslated/translated/failed 等；'
+                          'page 从 0 开始。')
+    async def list_texts(content_type: ContentTypes, page: int = 0, size: int = 50,
                          filter_mode: str = 'all', search: str = '',
                          character: str = '') -> dict:
         return await _call(app, 'GET', f'/api/current/texts/{content_type}',
@@ -130,8 +136,8 @@ def register_curated(mcp: MCPServer, app: FastAPI) -> None:
 
     # ---- 术语表 ----
 
-    @mcp.tool(description='术语表分页查询。')
-    async def list_glossary(page: int = 1, size: int = 50,
+    @mcp.tool(description='术语表分页查询（page 从 0 开始）。')
+    async def list_glossary(page: int = 0, size: int = 50,
                             search: str = '') -> dict:
         return await _call(app, 'GET', '/api/current/glossary',
                            params={'page': page, 'size': size, 'search': search})
