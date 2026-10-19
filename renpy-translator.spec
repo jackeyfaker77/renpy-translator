@@ -59,8 +59,13 @@ if sys.platform == 'darwin':
 
 hiddenimports += collect_submodules('webview')
 hiddenimports += collect_submodules('uvicorn')
-# MCP SDK（/mcp 接入层）：子模块较多且有惰性导入，整体收集防冻结后缺件
-hiddenimports += collect_submodules('mcp')
+# MCP SDK（/mcp 接入层）：只收服务端相关子模块。
+# 不可 collect 全量——mcp.cli 会 import typer（mcp[cli] 可选依赖），
+# 冻结环境没装，PyInstaller 自省直接炸（v0.5.0 首打包即踩）
+hiddenimports += collect_submodules(
+    'mcp',
+    filter=lambda n: not n.startswith('mcp.cli'),
+)
 hiddenimports += collect_submodules('mcp_types')
 
 a = Analysis(
