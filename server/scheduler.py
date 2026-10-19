@@ -258,10 +258,13 @@ async def fire(state, task: dict) -> dict:
     job_id = (result or {}).get('job_id')
     if job_id:
         state._scheduled_runtimes[job_id] = rt
+        status = '已触发'
     else:
         rt.close()
+        # 无事可做（如已全部翻译）：把原因写进上次状态，不显示成「触发了但没反应」
+        status = (result or {}).get('message') or '已触发（无事可做）'
     state.app_db.update_scheduled_task(
-        task['id'], last_job_id=job_id or '', last_status='已触发',
+        task['id'], last_job_id=job_id or '', last_status=status,
         last_fired_at=datetime.now().isoformat(timespec='seconds'))
     return {'job_id': job_id}
 
