@@ -6,6 +6,7 @@ chat_completion；调用方不应再直接戳 translator._call_api。
 """
 
 import time
+import uuid
 from typing import Optional, Callable
 
 import openai
@@ -38,6 +39,15 @@ _RETRYABLE_REASONS = {
     503: '服务器负载过高',
     504: '网关超时',
 }
+
+
+def _needs_opencode_session(api_base: str) -> bool:
+    """OpenCode Go（opencode.ai）网关是否要求会话头。
+
+    2026-09 起每个请求必须带 x-opencode-session（稳定会话 ID），
+    否则 400 MissingSessionID。仅匹配 opencode.ai 域名，不影响其他接口。
+    """
+    return 'opencode.ai' in (api_base or '').lower()
 
 
 def _extract_cache_info(response) -> tuple:
@@ -78,14 +88,21 @@ class LLMClient:
         # api_log_callback(request_body, response_body, task_type, meta)
         # meta = {ok, duration_ms, attempt, error}；失败/重试耗尽也回调
         # （响应体为 {'error': ...}），避免「没日志=没请求」的误导
+        # OpenCode Go 会话 ID：客户端生命周期内稳定（换配置再换回来也沿用），
+        # 保住路由亲和与 prompt 缓存；新客户端换新 ID
+        self._opencode_session = f'ses_{uuid.uuid4().hex[:26]}'
         self._init_client()
 
     def _init_client(self):
         if self.config.api_key:
+            headers = {}
+            if _needs_opencode_session(getattr(self.config, 'api_base', '')):
+                headers['x-opencode-session'] = self._opencode_session
             self.client = OpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.api_base,
                 max_retries=0,  # 关闭 SDK 自带重试，由 chat_completion 统一控制
+                default_headers=headers or None,
             )
 
     def update_config(self, config):

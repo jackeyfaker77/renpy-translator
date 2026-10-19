@@ -67,3 +67,4 @@ node_modules/
 /_*.py
 /_*.png
 web/_*.txt
+.playwright-mcp/
