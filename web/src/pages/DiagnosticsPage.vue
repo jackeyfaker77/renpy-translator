@@ -126,6 +126,15 @@ const timeSpan = computed(() => {
   return { min, span: Math.max(max - min, 1000) }
 })
 
+/** 时长按量级切换单位：<1s 用毫秒，<60s 用秒，否则分钟——避免长串毫秒 */
+function fmtDur(ms: number | null): string {
+  if (ms == null) return '—'
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const min = ms / 60000
+  return min < 10 ? `${min.toFixed(1)}min` : `${Math.round(min)}min`
+}
+
 function barStyle(e: ApiLogEntry) {
   const span = timeSpan.value
   if (!span) return {}
@@ -141,7 +150,7 @@ function barStyle(e: ApiLogEntry) {
 
 function barTitle(e: ApiLogEntry) {
   return `${e.ts} · ${TASK_LABELS[e.task_type] || e.task_type}`
-      + ` · ${e.duration_ms == null ? '—' : e.duration_ms + 'ms'}${e.ok ? '' : ' · 失败：' + e.error}`
+      + ` · ${fmtDur(e.duration_ms)}${e.ok ? '' : ' · 失败：' + e.error}`
 }
 
 // ---- 展示辅助 ----
@@ -264,7 +273,7 @@ onUnmounted(() => {
           </span>
           <span class="c-task">{{ taskLabel(e.task_type) }}</span>
           <span class="c-usage">{{ usageSummary(e.usage) }}</span>
-          <span class="c-dur">{{ e.duration_ms == null ? '—' : e.duration_ms + 'ms' }}</span>
+          <span class="c-dur">{{ fmtDur(e.duration_ms) }}</span>
           <span class="c-preview">{{ preview(e) }}</span>
         </div>
         <n-empty v-if="!filtered.length" description="暂无调用记录" style="margin: 24px 0" />
@@ -284,7 +293,7 @@ onUnmounted(() => {
         </n-space>
         <n-text depth="3" style="display: block; font-size: 12px; margin-bottom: 8px">
           {{ selected.ts }} · {{ selected.model || selected.request?.model || '—' }}
-          · {{ selected.duration_ms == null ? '—' : selected.duration_ms + 'ms' }} · 尝试 {{ selected.attempt }} 次
+          · {{ fmtDur(selected.duration_ms) }} · 尝试 {{ selected.attempt }} 次
           · {{ usageSummary(selected.usage) }}
           <template v-if="!selected.ok"> · {{ selected.error }}</template>
         </n-text>
