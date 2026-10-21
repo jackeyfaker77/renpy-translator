@@ -415,6 +415,6 @@ tools/python-embed/LICENSE.txt），仅用于冻结环境下的反编译子进�
 
 如果这个工具帮到了你，欢迎请作者喝杯奶茶，支持持续开发与维护：
 
-[![爱发电 · 请我喝杯奶茶](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E8%AF%B7%E6%88%91%E5%96%9D%E6%9D%AF%E5%A5%B6%E8%8C%B6-7e5fd9?logo=afdian&logoColor=white)](https://ifdian.net/a/yschdxm)
+<a href="https://ifdian.net/a/yschdxm"><img width="200" src="https://pic1.afdiancdn.com/static/img/welcome/button-sponsorme.png" alt="在爱发电支持我"></a>
 
 或直接访问：<https://ifdian.net/a/yschdxm>
