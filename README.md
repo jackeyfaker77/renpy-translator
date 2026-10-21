@@ -416,9 +416,9 @@ tools/python-embed/LICENSE.txt），仅用于冻结环境下的反编译子进�
 
 本工具完全免费、开源。如果它为你的汉化工作节省了时间，欢迎通过下面任意一种方式请作者喝杯咖啡——你的每一份支持都会化作后续的功能更新与问题修复：
 
-<a href="https://ifdian.net/a/yschdxm"><img width="200" src="https://pic1.afdiancdn.com/static/img/welcome/button-sponsorme.png" alt="在爱发电支持我"></a>
-
 <div align="center">
+
+<a href="https://ifdian.net/a/yschdxm"><img width="200" src="https://pic1.afdiancdn.com/static/img/welcome/button-sponsorme.png" alt="在爱发电支持我"></a>
 
 | 支付宝 | 微信支付 |
 |:---:|:---:|
