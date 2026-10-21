@@ -412,14 +412,18 @@ tools/python-embed/LICENSE.txt），仅用于冻结环境下的反编译子进�
 
 ---
 
-## 支持本项目
+## 💝 支持开发
 
-如果这个工具帮到了你，欢迎请作者喝杯奶茶，支持持续开发与维护：
+本工具完全免费、开源。如果它为你的汉化工作节省了时间，欢迎通过下面任意一种方式请作者喝杯咖啡——你的每一份支持都会化作后续的功能更新与问题修复：
 
 <a href="https://ifdian.net/a/yschdxm"><img width="200" src="https://pic1.afdiancdn.com/static/img/welcome/button-sponsorme.png" alt="在爱发电支持我"></a>
 
-也可以直接扫码：
+<div align="center">
 
 | 支付宝 | 微信支付 |
-|---|---|
-| <img src="./.github/assets/alipay.png" alt="支付宝收款码" width="300"> | <img src="./.github/assets/wechat-pay.png" alt="微信支付收款码" width="300"> |
+|:---:|:---:|
+| <img src="./.github/assets/alipay.png" alt="支付宝收款码" width="280"> | <img src="./.github/assets/wechat-pay.png" alt="微信支付收款码" width="280"> |
+
+*不方便扫码？也欢迎在 [爱发电](https://ifdian.net/a/yschdxm) 上支持，那里可以留下你想看的功能需求。*
+
+</div>
