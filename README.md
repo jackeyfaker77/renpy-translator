@@ -422,7 +422,7 @@ tools/python-embed/LICENSE.txt），仅用于冻结环境下的反编译子进�
 
 | 支付宝 | 微信支付 |
 |:---:|:---:|
-| <img src="./.github/assets/alipay.png" alt="支付宝收款码" width="280"> | <img src="./.github/assets/wechat-pay.png" alt="微信支付收款码" width="280"> |
+| <img src="./.github/assets/alipay.png" alt="支付宝收款码" height="340"> | <img src="./.github/assets/wechat-pay.png" alt="微信支付收款码" height="340"> |
 
 *不方便扫码？也欢迎在 [爱发电](https://ifdian.net/a/yschdxm) 上支持，那里可以留下你想看的功能需求。*
 
