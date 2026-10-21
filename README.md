@@ -408,3 +408,13 @@ tools/python-embed/LICENSE.txt），仅用于冻结环境下的反编译子进�
 - 请尊重游戏开发者的劳动成果，支持正版游戏
 - 请遵守当地法律法规，尊重知识产权
 - 本工具仅供学习研究，请勿用于商业用途
+
+---
+
+## 支持本项目
+
+如果这个工具帮到了你，欢迎请作者喝杯奶茶，支持持续开发与维护：
+
+<img src="https://afdian.com/static/img/welcome/button-sponsorme.png" alt="在爱发电支持我" width="200">
+
+或直接访问：<https://ifdian.net/a/yschdxm>
