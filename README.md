@@ -12,6 +12,7 @@ AI 翻译 + 手动校对，支持解包/反编译、人名与角色分析、内�
 [![下载量](https://img.shields.io/github/downloads/yschdxm/renpy-translator/total)](https://github.com/yschdxm/renpy-translator/releases)
 [![最近提交](https://img.shields.io/github/last-commit/yschdxm/renpy-translator)](https://github.com/yschdxm/renpy-translator/commits/master)
 [![Issues](https://img.shields.io/github/issues/yschdxm/renpy-translator)](https://github.com/yschdxm/renpy-translator/issues)
+[![爱发电](https://img.shields.io/badge/%E7%88%B1%E5%8F%91%E7%94%B5-%E8%AF%B7%E6%88%91%E5%96%9D%E6%9D%AF%E5%A5%B6%E8%8C%B6-7e5fd9?logo=afdian&logoColor=white)](https://ifdian.net/a/yschdxm)
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Vue](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
