@@ -418,4 +418,8 @@ tools/python-embed/LICENSE.txt），仅用于冻结环境下的反编译子进�
 
 <a href="https://ifdian.net/a/yschdxm"><img width="200" src="https://pic1.afdiancdn.com/static/img/welcome/button-sponsorme.png" alt="在爱发电支持我"></a>
 
-或直接访问：<https://ifdian.net/a/yschdxm>
+也可以直接扫码：
+
+| 支付宝 | 微信支付 |
+|---|---|
+| <img src="./.github/assets/alipay.png" alt="支付宝收款码" width="300"> | <img src="./.github/assets/wechat-pay.png" alt="微信支付收款码" width="300"> |
