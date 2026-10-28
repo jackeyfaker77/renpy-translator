@@ -25,8 +25,10 @@ def parse_translation_files(tl_dir, game_dir: str, logger=None) -> dict:
             in_strings = False
 
             for line in lines:
-                if 'translate chinese strings:' in line:
+                if re.match(r'^translate\s+\w+\s+strings\s*:', line):
                     in_strings = True
+                elif re.match(r'^translate\s+\w+\s+\w+\s*:', line):
+                    in_strings = False
                 if in_strings:
                     strings_lines.append(line)
                 else:
@@ -58,6 +60,7 @@ def _parse_dialogue_blocks(lines, tl_file, game_path, dialogues, ui_texts):
         current_file = str(tl_file).replace('\\', '/')
 
     current_label = ""
+    current_translate_id = ""
     current_line_no = 0
     i = 0
     while i < len(lines):
@@ -70,6 +73,7 @@ def _parse_dialogue_blocks(lines, tl_file, game_path, dialogues, ui_texts):
         translate_match = re.match(r'^translate\s+\w+\s+(\w+)\s*:', line)
         if translate_match:
             raw_label = translate_match.group(1)
+            current_translate_id = raw_label
             # 去掉末尾的 hex hash 段（如 luna_gallery_intro_71d6afad → luna_gallery_intro）
             # Ren'Py 生成的 translate id 哈希固定为 8 位 hex；
             # 必须恰好 8 位，否则 scene_facade、act_decade 等全 a-f 结尾的合法 label 会被误截
@@ -137,6 +141,7 @@ def _parse_dialogue_blocks(lines, tl_file, game_path, dialogues, ui_texts):
             entry = {
                 'file_path': full_path, 'line_number': current_line_no,
                 'label': current_label,
+                'translate_id': current_translate_id,
                 'character': character, 'original_text': text,
                 'translated_text': trans_text if is_translated else '',
                 'is_translated': is_translated,

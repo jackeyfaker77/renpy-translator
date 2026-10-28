@@ -194,6 +194,52 @@ def test_sweep_wrapped_literal_and_tl_old(tmp_path):
     assert 'new "查看全部"' in tl_text  # new 行不动（填充时重建）
 
 
+def test_sweep_then_fill_uses_original_translation_key(tmp_path):
+    """导出补 !t 后，原始键的译文仍要填入，并同步改写译文插值。"""
+    out, sub = _mk_sweep_export(tmp_path)
+    (sub / 'screen.rpy').write_text(
+        'screen s:\n    text "Hello [player_name]"\n', encoding='utf-8')
+    tl = out / 'game' / 'tl' / 'chinese'
+    tl.mkdir(parents=True)
+    target = tl / 'screen.rpy'
+    target.write_text(
+        'translate chinese strings:\n\n'
+        '    old "Hello [player_name]"\n'
+        '    new ""\n', encoding='utf-8')
+    ex = object.__new__(GameExporter)
+    ex._blocked = []
+    ex._cancel_event = None
+    ex._sweep_ttag(out, lambda _: None)
+
+    assert ex._fill_strings(tl, {
+        'Hello [player_name]': '你好，[player_name]'
+    }) == 1
+    content = target.read_text(encoding='utf-8')
+    assert 'old "Hello [player_name!t]"' in content
+    assert 'new "你好，[player_name!t]"' in content
+    assert not ex._blocked
+
+
+def test_ttag_alias_still_blocks_broken_interpolation(tmp_path):
+    out, _ = _mk_sweep_export(tmp_path)
+    tl = out / 'game' / 'tl' / 'chinese'
+    tl.mkdir(parents=True)
+    target = tl / 'screen.rpy'
+    target.write_text(
+        'translate chinese strings:\n\n'
+        '    old "Hello [player_name!t]"\n'
+        '    new ""\n', encoding='utf-8')
+    ex = object.__new__(GameExporter)
+    ex._blocked = []
+    ex._cancel_event = None
+
+    assert ex._fill_strings(tl, {
+        'Hello [player_name]': '你好，[wrong_name]'
+    }) == 0
+    assert 'new ""' in target.read_text(encoding='utf-8')
+    assert len(ex._blocked) == 1
+
+
 def test_sweep_skips_non_prop_lines(tmp_path):
     out, sub = _mk_sweep_export(tmp_path)
     original = ('label start:\n'

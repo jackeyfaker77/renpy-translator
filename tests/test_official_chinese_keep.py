@@ -19,7 +19,8 @@ from database import ProjectDatabase
 from logger import TranslationLogger
 from project_manager import ProjectManager
 from services.project_creation import (
-    ProjectCreator, dedupe_translations, normalize_official_chinese,
+    ProjectCreator, dedupe_translations, detect_official_chinese,
+    normalize_official_chinese, parse_tl_dir,
 )
 
 
@@ -75,6 +76,52 @@ def test_normalize_ignores_none_lang(tmp_path):
 def test_normalize_no_tl_dir(tmp_path):
     (tmp_path / 'game').mkdir()
     assert normalize_official_chinese(tmp_path) is None
+
+
+def test_simplified_chinese_imports_by_id_without_renaming(tmp_path):
+    """保留游戏原生语言名，给 SDK 的 chinese 模板填入对应官中译文。"""
+    tl = tmp_path / 'game' / 'tl'
+    primary = tl / 'chinese'
+    official = tl / 'SimplifiedChinese'
+    primary.mkdir(parents=True)
+    official.mkdir()
+    (primary / 'story.rpy').write_text(
+        '# game/story.rpy:1\n'
+        'translate chinese start_12345678:\n\n'
+        '    # nar "Hello [name]."\n'
+        '    nar "Hello [name]."\n'
+        '# game/story.rpy:2\n'
+        'translate chinese start_87654321:\n\n'
+        '    # nar "New line."\n'
+        '    nar "New line."\n'
+        'translate chinese strings:\n'
+        '    # game/story.rpy:3\n'
+        '    old "Start"\n'
+        '    new ""\n', encoding='utf-8')
+    (official / 'story.rpy').write_text(
+        '# game/story.rpy:1\n'
+        'translate SimplifiedChinese start_12345678:\n\n'
+        '    # nar "Hello [name]."\n'
+        '    nar "你好，[name]。"\n'
+        '# game/story.rpy:2\n'
+        'translate SimplifiedChinese changed_87654321:\n\n'
+        '    # nar "New line."\n'
+        '    nar "旧版本译文。"\n'
+        'translate SimplifiedChinese strings:\n'
+        '    # game/story.rpy:3\n'
+        '    old "Start"\n'
+        '    new "开始"\n', encoding='utf-8')
+
+    assert detect_official_chinese(tmp_path) == 2
+    assert normalize_official_chinese(tmp_path) is None
+    assert official.exists()
+    result = parse_tl_dir(primary, tmp_path, None)
+    by_original = {r['original_text']: r for r in result['dialogues']}
+    assert by_original['Hello [name].']['translated_text'] == '你好，[name]。'
+    assert by_original['Hello [name].']['is_translated'] is True
+    assert by_original['New line.']['is_translated'] is False
+    ui = {r['original_text']: r for r in result['ui_texts']}
+    assert ui['Start']['translated_text'] == '开始'
 
 
 # ---- dedupe_translations ----

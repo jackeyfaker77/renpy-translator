@@ -39,7 +39,12 @@ CHINESE_LANG_NAMES = {
     'chinese', 'zh', 'ch', 'chs', 'cht', 'zhs', 'zht',
     'schinese', 'tchinese', 'cn', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant',
     'simplified_chinese', 'traditional_chinese',
+    'simplifiedchinese', 'traditionalchinese',
 }
+
+# 这些是游戏代码实际使用的语言名，不能仅改目录名为 chinese；保留原
+# 语言给游戏菜单，另在解析阶段按翻译块 ID 把官中译文导入工具数据库。
+_NATIVE_CHINESE_NAMES = {'simplifiedchinese', 'traditionalchinese'}
 
 
 def detect_official_chinese(game_work_dir: Path) -> int:
@@ -85,10 +90,11 @@ def remove_official_chinese(game_work_dir: Path, logger: TranslationLogger = Non
 
 def normalize_official_chinese(game_work_dir: Path,
                                logger: TranslationLogger = None) -> str | None:
-    """保留官中时归一语言目录：非 chinese 的中文目录改名为 chinese。
+    """保留官中时归一可安全改名的中文语言目录。
 
-    SDK 只生成 tl/chinese、导出与运行时也只认 chinese——官方译文若在
-    schinese/zh 等目录，改名归并后才能被 SDK 追加与解析入库。
+    SDK 只生成 tl/chinese、导出与运行时也只认 chinese。官方译文若在
+    schinese/zh 等目录，可改名归并；游戏使用的 SimplifiedChinese /
+    TraditionalChinese 必须保留原名，解析时再合并其译文。
     已存在 chinese 时不改名（避免覆盖），返回 None；改名成功返回原目录名。
     """
     tl_root = game_work_dir / 'game' / 'tl'
@@ -100,11 +106,13 @@ def normalize_official_chinese(game_work_dir: Path,
             continue
         if lang_dir.name.lower() not in CHINESE_LANG_NAMES:
             continue
+        if lang_dir.name.lower() in _NATIVE_CHINESE_NAMES:
+            continue
         if chinese.exists():
             if logger:
                 logger.warning(
                     f'同时存在多个中文翻译目录（chinese 与 {lang_dir.name}），'
-                    f'保留官中仅使用 chinese，{lang_dir.name} 保持原样',
+                    f'保留 {lang_dir.name} 并在解析时合并其中的译文',
                     panel='projects')
             continue
         lang_dir.rename(chinese)
@@ -314,11 +322,53 @@ async def generate_tl_templates(sdk_path: str, game_work_dir: Path,
 
 def parse_tl_dir(tl_dir: Path, game_work_dir: Path,
                  logger: TranslationLogger) -> dict:
-    """解析 SDK 生成的 tl/chinese 目录（同步，调用方放 executor）"""
+    """解析 SDK 模板并按翻译块 ID 合并其它中文目录的官方译文。"""
     from tl_parser import parse_translation_files
     result = parse_translation_files(tl_dir, str(game_work_dir), logger=logger)
+    for lang_dir in sorted(tl_dir.parent.iterdir()):
+        if (lang_dir == tl_dir or not lang_dir.is_dir()
+                or lang_dir.name.lower() not in CHINESE_LANG_NAMES):
+            continue
+        official = parse_translation_files(
+            lang_dir, str(game_work_dir), logger=logger)
+        result, counts = merge_official_translations(result, official)
+        if logger and (counts['dialogues'] or counts['ui_texts']):
+            logger.info(
+                f'从 tl/{lang_dir.name} 导入官方译文：'
+                f'对话 {counts["dialogues"]} 条，字符串 {counts["ui_texts"]} 条',
+                panel='projects')
     # 保留官中重跑时 identifier 失配会追加未译副本，按 (file, 原文) 去重
     return dedupe_translations(result)
+
+
+def merge_official_translations(result: dict, official: dict) -> tuple[dict, dict]:
+    """只填空白项；对话按 Ren'Py 块 ID + 原文，字符串按唯一原文匹配。"""
+    dialogue_map: dict[tuple[str, str], set[str]] = {}
+    for row in official.get('dialogues', []):
+        if row.get('is_translated') and row.get('translate_id'):
+            key = (row['translate_id'], row['original_text'])
+            dialogue_map.setdefault(key, set()).add(row['translated_text'])
+
+    string_map: dict[str, set[str]] = {}
+    for row in official.get('ui_texts', []):
+        if row.get('is_translated'):
+            string_map.setdefault(row['original_text'], set()).add(
+                row['translated_text'])
+
+    counts = {'dialogues': 0, 'ui_texts': 0}
+    for kind, candidates in (
+            ('dialogues', dialogue_map), ('ui_texts', string_map)):
+        for row in result.get(kind, []):
+            if row.get('is_translated'):
+                continue
+            key = ((row.get('translate_id'), row['original_text'])
+                   if kind == 'dialogues' else row['original_text'])
+            translations = candidates.get(key, set())
+            if len(translations) == 1:
+                row['translated_text'] = next(iter(translations))
+                row['is_translated'] = True
+                counts[kind] += 1
+    return result, counts
 
 
 class ProjectCreator:
@@ -400,8 +450,8 @@ class ProjectCreator:
                     await _rie(remove_official_chinese, game_work_dir, self.logger)
                     self.logger.info(f'已删除官方中文翻译（{official_tl} 个文件）', panel='projects')
                 else:
-                    # 保留官中：语言目录归一到 chinese，SDK 追加未译条目，
-                    # 官方译文经 parse_tl_dir 直接入库为已译
+                    # 保留官中：可安全改名的目录归一到 chinese；游戏原生
+                    # 语言名保持不变，由 parse_tl_dir 按块 ID 合并译文。
                     progress(0.50, '保留官方中文翻译，继续...')
                     renamed = await _rie(normalize_official_chinese,
                                           game_work_dir, self.logger)

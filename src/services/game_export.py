@@ -423,6 +423,11 @@ class GameExporter:
                                           f'正在填充字符串翻译... ({c}/{t})'))
                 log(f'字符串翻译: {u_count} 条')
 
+                # 有些游戏菜单实际切换到 SimplifiedChinese 等原生语言名。
+                # chinese 是工具生成的模板，单独填它不会影响这些菜单项。
+                # 只补官中仍为空的行，避免改写游戏已有的官方译文。
+                self._fill_native_chinese(tl_dir.parent, translation_dict, log)
+
                 tip_count = self._add_tooltip_title_entries(
                     tl_dir, translation_dict)
                 if tip_count:
@@ -502,7 +507,22 @@ class GameExporter:
 
         return filled
 
-    def _fill_dialogue(self, tl_dir: Path, translation_dict: dict, progress_cb=None) -> int:
+    def _fill_native_chinese(self, tl_root: Path, translation_dict: dict,
+                             log) -> None:
+        """补全游戏菜单使用的原生中文语言目录，保留其已有译文。"""
+        for native_dir in sorted(tl_root.iterdir()):
+            if (not native_dir.is_dir() or native_dir.name.lower() not in
+                    {'simplifiedchinese', 'traditionalchinese'}):
+                continue
+            native_dialogues = self._fill_dialogue(
+                native_dir, translation_dict, only_untranslated=True)
+            native_strings = self._fill_strings(
+                native_dir, translation_dict, only_untranslated=True)
+            log(f'tl/{native_dir.name} 补全：对话 {native_dialogues} 条，'
+                f'字符串 {native_strings} 条')
+
+    def _fill_dialogue(self, tl_dir: Path, translation_dict: dict,
+                       progress_cb=None, only_untranslated: bool = False) -> int:
         """填充对话翻译，progress_cb(已处理文件数, 总文件数) 回报进度"""
         # 引号说话人（"Ricardo" "..." 匿名角色）的名字不在 Character()
         # 定义里，zz_char_names.rpy 管不到——在 new 行直接替换说话人
@@ -546,6 +566,11 @@ class GameExporter:
                         # old/new 是 strings 块的行，绝不能当对话发言处理
                         if content_match and content_match.group(1) not in ('old', 'new'):
                             text = content_match.group(2).replace('\\"', '"')
+                            if (only_untranslated
+                                    and lines[i + 1].strip() != comment_text):
+                                new_lines.append(lines[i + 1])
+                                i += 2
+                                continue
                             if text in translation_dict:
                                 cn = translation_dict[text]
                                 probs = markup_check.check_pair(text, cn)
@@ -571,6 +596,11 @@ class GameExporter:
                             continue
                         elif narration_match:
                             text = narration_match.group(1).replace('\\"', '"')
+                            if (only_untranslated
+                                    and lines[i + 1].strip() != comment_text):
+                                new_lines.append(lines[i + 1])
+                                i += 2
+                                continue
                             if text in translation_dict:
                                 cn = translation_dict[text]
                                 probs = markup_check.check_pair(text, cn)
@@ -653,8 +683,19 @@ class GameExporter:
             f.write('\n'.join(parts) + '\n')
         return len(additions)
 
-    def _fill_strings(self, tl_dir: Path, translation_dict: dict, progress_cb=None) -> int:
+    def _fill_strings(self, tl_dir: Path, translation_dict: dict,
+                      progress_cb=None, only_untranslated: bool = False) -> int:
         """填充字符串翻译，progress_cb(已处理文件数, 总文件数) 回报进度"""
+        from markup_check import add_tflag
+
+        # _sweep_ttag 会在导出副本中给 old 行补 !t，但数据库仍保存建项时
+        # 的原始键。为导出形态建立别名，避免补旗标后精确查找失配。
+        ttag_aliases = {}
+        for original, translated in translation_dict.items():
+            flagged = add_tflag(original)
+            if flagged != original:
+                ttag_aliases[flagged] = (original, translated)
+
         def _handle(lines):
             filled = 0
             new_lines = []
@@ -666,17 +707,31 @@ class GameExporter:
                     old_text = old_match.group(1).replace('\\"', '"')
                     new_lines.append(line)
                     translated = translation_dict.get(old_text)
+                    source_original = old_text
+                    ttag_added = False
+                    if translated is None and old_text in ttag_aliases:
+                        source_original, translated = ttag_aliases[old_text]
+                        ttag_added = True
 
                     if i + 1 < len(lines):
                         new_match = re.match(r'^\s+new\s+"(.*)"\s*$', lines[i + 1])
                         if new_match:
+                            current = new_match.group(1).replace('\\"', '"')
+                            if (only_untranslated and current
+                                    and current != old_text):
+                                new_lines.append(lines[i + 1])
+                                i += 2
+                                continue
                             if translated:
-                                probs = markup_check.check_pair(old_text, translated)
+                                probs = markup_check.check_pair(
+                                    source_original, translated)
                                 if probs:
                                     self._blocked.append(
                                         (old_text, '；'.join(probs)))
                                     new_lines.append(lines[i + 1])
                                 else:
+                                    if ttag_added:
+                                        translated = add_tflag(translated)
                                     # .format 模板（含 {N} 占位）不做 % 转义：
                                     # {1:+.0%} 的 % 是格式规格，双写会把
                                     # .format 炸掉（生产事故）
